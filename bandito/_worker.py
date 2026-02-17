@@ -13,6 +13,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("bandito")
 
+_TEXT_FIELDS = ("query_text", "response_text")
+
+
+def strip_text_fields(events: list[dict]) -> list[dict]:
+    """Return shallow copies of events with query_text/response_text removed."""
+    stripped = []
+    for e in events:
+        copy = e.copy()
+        for field in _TEXT_FIELDS:
+            copy.pop(field, None)
+        stripped.append(copy)
+    return stripped
+
 
 class BackgroundWorker:
     """Single daemon thread that handles:
@@ -31,12 +44,14 @@ class BackgroundWorker:
         *,
         sync_interval: float = 30.0,
         flush_interval: float = 5.0,
+        data_storage: str = "local",
     ) -> None:
         self._http = http
         self._store = store
         self._on_sync = on_sync
         self._sync_interval = sync_interval
         self._flush_interval = flush_interval
+        self._data_storage = data_storage
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -81,7 +96,8 @@ class BackgroundWorker:
             pending = self._store.pending()
             if not pending:
                 return
-            result = self._http.ingest_events(pending)
+            payload = strip_text_fields(pending) if self._data_storage == "local" else pending
+            result = self._http.ingest_events(payload)
             # Mark all sent events as flushed (server handles dedup)
             uuids = [e["local_event_uuid"] for e in pending]
             self._store.mark_flushed(uuids)

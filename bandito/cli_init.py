@@ -35,7 +35,13 @@ def run_init() -> None:
     ).strip()
     base_url = base_url_input or DEFAULT_BASE_URL
 
-    # 4. Validate connection
+    # 4. Data storage preference
+    storage_answer = input(
+        "  Store query/response text in the cloud? [y/N]: "
+    ).strip().lower()
+    data_storage = "cloud" if storage_answer == "y" else "local"
+
+    # 5. Validate connection
     print(f"  Connecting to {base_url}...")
     try:
         from bandito.http import BanditoHTTP
@@ -64,11 +70,11 @@ def run_init() -> None:
 
     print("  Connected!")
 
-    # 5. Save config
-    save_config(api_key, base_url)
+    # 6. Save config
+    save_config(api_key, base_url, data_storage)
     print(f"  Config saved to {CONFIG_FILE}")
 
-    # 6. Next steps
+    # 7. Next steps
     print()
     print("  Next steps:")
     print("    1. Create a bandit:  bandito create")

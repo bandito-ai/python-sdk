@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from bandito._worker import BackgroundWorker
+from bandito._worker import BackgroundWorker, strip_text_fields
 from bandito.engine import (
     DEFAULT_RELATIVE_LATENCY,
     MIN_QUERY_LENGTH,
@@ -70,12 +70,14 @@ class BanditoClient:
         sync_interval: float = 30.0,
         flush_interval: float = 5.0,
         store_path: str | None = None,
+        data_storage: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url
         self._sync_interval = sync_interval
         self._flush_interval = flush_interval
         self._store_path = store_path
+        self._data_storage_arg = data_storage
 
         self._http: BanditoHTTP | None = None
         self._store: EventStore | None = None
@@ -83,6 +85,7 @@ class BanditoClient:
         self._bandits: dict[str, _BanditCache] = {}  # name → cache
         self._lock = threading.Lock()
         self._connected = False
+        self._data_storage = data_storage or "local"
         self._rng = np.random.default_rng()
 
     def connect(self) -> None:
@@ -103,6 +106,11 @@ class BanditoClient:
         base_url = self._base_url or os.environ.get(
             "BANDITO_BASE_URL", DEFAULT_BASE_URL
         )
+
+        # Resolve data_storage: constructor arg → config file → "local" default
+        if not self._data_storage_arg:
+            from bandito.config import load_config
+            self._data_storage = load_config().data_storage
 
         self._http = BanditoHTTP(base_url, api_key)
         store_path = self._store_path or DEFAULT_STORE_PATH
@@ -125,6 +133,7 @@ class BanditoClient:
             self._on_sync,
             sync_interval=self._sync_interval,
             flush_interval=self._flush_interval,
+            data_storage=self._data_storage,
         )
         self._worker.start()
         self._connected = True
@@ -419,7 +428,8 @@ class BanditoClient:
             pending = self._store.pending()
             if not pending:
                 return
-            self._http.ingest_events(pending)
+            payload = strip_text_fields(pending) if self._data_storage == "local" else pending
+            self._http.ingest_events(payload)
             uuids = [e["local_event_uuid"] for e in pending]
             self._store.mark_flushed(uuids)
             logger.debug("Flushed %d pending events on connect/close", len(pending))

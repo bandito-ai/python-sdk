@@ -54,7 +54,8 @@ class TestInitSavesConfig:
     @respx.mock
     def test_saves_config_custom_url(self, config_dir, monkeypatch):
         monkeypatch.setattr(getpass, "getpass", lambda _: "bnd_key")
-        monkeypatch.setattr("builtins.input", lambda _: "http://custom:9000")
+        inputs = iter(["http://custom:9000", ""])  # custom URL, default storage
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         respx.get("http://custom:9000/api/v1/bandits").mock(
             return_value=httpx.Response(200, json={"items": [], "total": 0})
@@ -66,6 +67,42 @@ class TestInitSavesConfig:
 
         content = (config_dir / "config.toml").read_text()
         assert 'base_url = "http://custom:9000"' in content
+
+
+    @respx.mock
+    def test_saves_cloud_storage(self, config_dir, monkeypatch):
+        """User answers 'y' to cloud storage → data_storage saved."""
+        monkeypatch.setattr(getpass, "getpass", lambda _: "bnd_key")
+        inputs = iter(["", "y"])  # default URL, cloud storage
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        respx.get(f"{DEFAULT_BASE_URL}/api/v1/bandits").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        from bandito.cli_init import run_init
+
+        run_init()
+
+        content = (config_dir / "config.toml").read_text()
+        assert 'data_storage = "cloud"' in content
+
+    @respx.mock
+    def test_default_local_storage(self, config_dir, monkeypatch):
+        """Default (N) → data_storage omitted from config (local is default)."""
+        monkeypatch.setattr(getpass, "getpass", lambda _: "bnd_key")
+        monkeypatch.setattr("builtins.input", lambda _: "")
+
+        respx.get(f"{DEFAULT_BASE_URL}/api/v1/bandits").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        from bandito.cli_init import run_init
+
+        run_init()
+
+        content = (config_dir / "config.toml").read_text()
+        assert "data_storage" not in content  # default omitted
 
 
 class TestInitUsesEnvVar:
@@ -127,7 +164,7 @@ class TestInitIdempotent:
         """Existing config + user says 'y' → overwrite."""
         (config_dir / "config.toml").write_text('api_key = "old_key"\n')
 
-        inputs = iter(["y", ""])  # overwrite=y, default URL
+        inputs = iter(["y", "", ""])  # overwrite=y, default URL, default storage
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
         monkeypatch.setattr(getpass, "getpass", lambda _: "bnd_new_key")
 

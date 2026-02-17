@@ -111,6 +111,7 @@ Bootstrap the SDK. Authenticates with the cloud, fetches all bandit state, flush
 | `sync_interval` | `float` | `30.0` | Seconds between background heartbeats |
 | `flush_interval` | `float` | `5.0` | Seconds between background event flushes |
 | `store_path` | `str` | `~/.bandito/events.db` | Path to SQLite file for event durability |
+| `data_storage` | `str` | `"local"` | `"local"` keeps query/response text local-only; `"cloud"` sends it to the server |
 
 ### `pull(bandit_name, *, query=None) -> PullResult`
 
@@ -210,7 +211,10 @@ Config is stored at `~/.bandito/config.toml` (created by `bandito init`):
 ```toml
 api_key = "bnd_..."
 base_url = "http://localhost:8000"
+data_storage = "cloud"  # omitted when using the default ("local")
 ```
+
+When `data_storage = "local"` (the default), query and response text are stored only in the local SQLite database and never sent to the cloud. Set to `"cloud"` to include text in server-side events.
 
 Environment variables override the config file:
 
@@ -218,6 +222,7 @@ Environment variables override the config file:
 |----------|-------------|
 | `BANDITO_API_KEY` | API key for authentication |
 | `BANDITO_BASE_URL` | Cloud API base URL |
+| `BANDITO_DATA_STORAGE` | `"local"` (default) or `"cloud"` — controls whether query/response text is sent to the server |
 
 ## Architecture
 
