@@ -1,25 +1,44 @@
 # Bandito Python SDK
 
-Contextual bandit optimization for LLM model and prompt selection. Zero-latency decisions via local Thompson Sampling, with crash-safe event durability and background cloud sync.
+Provider-agnostic contextual bandit optimization for LLM model and prompt selection. Zero-latency decisions via local Thompson Sampling, with crash-safe event durability and background cloud sync.
+
+Includes a terminal UI for reviewing and grading LLM responses.
 
 ## Installation
 
 ```bash
-pip install bandito
+pip install git+https://github.com/bandito-dev/bandito-sdk.git
 ```
 
-## Quick Start
+Requires Python 3.12+.
+
+## Getting Started
+
+### 1. Configure your API key
+
+```bash
+bandito init
+```
+
+Walks you through setup interactively — prompts for your API key (or reads `BANDITO_API_KEY` from the environment), validates the connection, and saves config to `~/.bandito/config.toml`.
+
+### 2. Create a bandit
+
+```bash
+bandito create
+```
+
+Opens the Bandito web dashboard where you can create bandits and configure arms (model + provider + system prompt combinations).
+
+### 3. Optimize
 
 ```python
 import bandito
 
-# Connect to cloud (reads BANDITO_API_KEY from env, or pass explicitly)
 bandito.connect(api_key="bnd_...")
 
-# Pull — local Thompson Sampling, <1ms, no network
 result = bandito.pull("my-chatbot", query=user_message)
 
-# Use the chosen arm
 response = openai.chat.completions.create(
     model=result.model,
     messages=[
@@ -28,7 +47,6 @@ response = openai.chat.completions.create(
     ],
 )
 
-# Send event to cloud — writes to local SQLite first, then flushes async
 bandito.update(
     result,
     query_text=user_message,
@@ -37,17 +55,33 @@ bandito.update(
     cost=0.003,
     latency=elapsed_ms,
 )
-
-# Optional: delayed human reward
-bandito.reward(result.event_id, reward=0.9)
-
-# Optional: explicit state refresh (background thread handles this automatically)
-bandito.sync()
 ```
 
-## Usage Patterns
+### 4. Grade responses
 
-### Module-level singleton (simplest)
+```bash
+bandito ui
+```
+
+Opens the terminal scoring workbench. Review LLM responses and grade them with `y` (good) / `n` (bad). Grades feed back into the bandit to improve future arm selection.
+
+## CLI Reference
+
+```
+Usage: bandito <command>
+
+Commands:
+  init     Configure API key and validate connection
+  create   Create a new bandit with arms
+  ui       Launch the TUI scoring workbench
+  help     Show this help message
+```
+
+## SDK API
+
+### Two usage patterns
+
+**Module-level singleton** (simplest):
 
 ```python
 import bandito
@@ -56,7 +90,7 @@ bandito.connect(api_key="bnd_...")
 result = bandito.pull("my-chatbot")
 ```
 
-### Explicit client (testing, multiple instances, DI)
+**Explicit client** (testing, multiple instances, DI):
 
 ```python
 from bandito import BanditoClient
@@ -66,20 +100,19 @@ client.connect()
 result = client.pull("my-chatbot")
 ```
 
-## API Reference
-
-### `bandito.connect(api_key=None, **kwargs)`
+### `connect(api_key=None, **kwargs)`
 
 Bootstrap the SDK. Authenticates with the cloud, fetches all bandit state, flushes any pending events from a previous crash, and starts the background sync worker.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `api_key` | `str` | `BANDITO_API_KEY` env | API key for authentication |
+| `base_url` | `str` | `http://localhost:8000` | Cloud API base URL |
 | `sync_interval` | `float` | `30.0` | Seconds between background heartbeats |
 | `flush_interval` | `float` | `5.0` | Seconds between background event flushes |
 | `store_path` | `str` | `~/.bandito/events.db` | Path to SQLite file for event durability |
 
-### `bandito.pull(bandit_name, *, query=None) -> PullResult`
+### `pull(bandit_name, *, query=None) -> PullResult`
 
 Local Thompson Sampling decision. Pure math, <1ms, no network call.
 
@@ -89,17 +122,15 @@ Local Thompson Sampling decision. Pure math, <1ms, no network call.
 | `query` | `str` | User query text (used for feature engineering) |
 
 Returns a `PullResult` with:
-- `result.arm` — the chosen `Arm` object
-- `result.model` — convenience for `arm.model_name`
-- `result.prompt` — convenience for `arm.system_prompt`
+- `result.model` — model name (e.g. `"gpt-4o"`)
+- `result.prompt` — system prompt text
 - `result.event_id` — UUID linking this pull to its update/reward
+- `result.arm` — full `Arm` object (model_name, model_provider, system_prompt, is_prompt_templated)
 - `result.scores` — `dict[int, float]` of arm_id to score (for debugging)
-- `result.bandit_id` — integer bandit ID
-- `result.bandit_name` — bandit name string
 
-### `bandito.update(pull_result, **kwargs)`
+### `update(pull_result, **kwargs)`
 
-Send event data to cloud. Writes to local SQLite WAL first (crash-safe), then the background worker flushes to cloud. Returns immediately.
+Report event data. Writes to local SQLite first (crash-safe), then the background worker flushes to cloud.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -109,13 +140,13 @@ Send event data to cloud. Writes to local SQLite WAL first (crash-safe), then th
 | `reward` | `float` | Immediate reward (0.0-1.0) |
 | `cost` | `float` | Cost in dollars |
 | `latency` | `float` | Latency in milliseconds |
-| `input_tokens` | `int` | Input token count |
+| `input_tokens` | `int` | Input token count (auto-calculates cost if `cost` not provided) |
 | `output_tokens` | `int` | Output token count |
 | `segment` | `dict[str, str]` | Key-value segment tags |
 
-### `bandito.reward(event_id, reward, *, is_human=True)`
+### `reward(event_id, reward, *, is_human=True)`
 
-Send a delayed reward for an existing event. Synchronous HTTP call.
+Send a delayed reward for an existing event. Synchronous HTTP call — blocks until confirmed.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -123,46 +154,70 @@ Send a delayed reward for an existing event. Synchronous HTTP call.
 | `reward` | `float` | | Reward value (0.0-1.0) |
 | `is_human` | `bool` | `True` | Whether this is a human-graded reward |
 
-### `bandito.sync()`
+### `sync()`
 
-Explicit state refresh from cloud. The background worker does this automatically on a schedule.
+Explicit state refresh from cloud. The background worker does this automatically every `sync_interval` seconds.
 
-### `bandito.close()`
+### `close()`
 
-Shut down the background worker, attempt a final event flush, and close all connections.
+Shut down the background worker, flush remaining events, and close all connections.
+
+## TUI Scoring Workbench
+
+Launch with `bandito ui`. On first run it prompts for your API key if `~/.bandito/config.toml` doesn't exist yet.
+
+**Screens:**
+- **Bandit selector** — pick which bandit to review
+- **Dashboard** — split-pane grading interface with event list, detail view, and toggleable stats sidebar
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `y` | Grade good (1.0) |
+| `n` | Grade bad (0.0) |
+| `s` | Skip (move to end of list) |
+| `Space` | Toggle selection (for batch grading) |
+| `a` | Select all |
+| `r` | Refresh |
+| `t` | Toggle stats/arms sidebar |
+| `g` | Toggle showing graded events |
+| `j`/`k` | Move cursor down/up |
+| `Enter` | Open event detail |
+| `Escape` | Go back |
+| `?` | Help |
+| `q` | Quit |
 
 ## How It Works
 
 The SDK caches the Bayesian posterior (θ, Cholesky factor) for each bandit locally. On `pull()`, it:
 
-1. Samples `θ_tilde` from the shared posterior via Thompson Sampling
+1. Samples θ&#771; from the shared posterior via Thompson Sampling
 2. Builds a feature vector per arm (model one-hot + prompt one-hot + query length interaction + latency interaction)
-3. Scores each arm: `score = x^T · θ_tilde`
+3. Scores each arm: score = x&#7511; · θ&#771;
 4. Returns the highest-scoring arm
 
 All Bayesian updates happen server-side. The SDK is a pure read cache that periodically refreshes via heartbeat.
 
-### Crash Safety
+**Crash safety** — Events are written to a local SQLite database (WAL mode) before any network call. If the process crashes, pending events are retried on the next `connect()`.
 
-Events are written to a local SQLite database (WAL mode) before any network call. If the process crashes, pending events are retried on the next `connect()`. No events are lost.
-
-### Fail-Safe
-
-If the cloud is unreachable, the SDK continues making decisions with the last-known-good weights. Your application never breaks due to a Bandito outage.
+**Fail-safe** — If the cloud is unreachable after initial connect, the SDK continues making decisions with the last-known-good weights. Your application never breaks due to a Bandito outage.
 
 ## Configuration
 
-| Environment Variable | Description |
-|---------------------|-------------|
-| `BANDITO_API_KEY` | API key (alternative to passing `api_key=` to `connect()`) |
+Config is stored at `~/.bandito/config.toml` (created by `bandito init`):
 
-## Development
-
-```bash
-cd sdk
-uv sync                # Install dependencies
-uv run pytest -q       # Run tests (55 tests)
+```toml
+api_key = "bnd_..."
+base_url = "http://localhost:8000"
 ```
+
+Environment variables override the config file:
+
+| Variable | Description |
+|----------|-------------|
+| `BANDITO_API_KEY` | API key for authentication |
+| `BANDITO_BASE_URL` | Cloud API base URL |
 
 ## Architecture
 
@@ -170,12 +225,28 @@ uv run pytest -q       # Run tests (55 tests)
 bandito/
 ├── __init__.py        # Module-level API (lazy singleton)
 ├── client.py          # BanditoClient orchestrator
-├── models.py          # Arm, PullResult, _BanditCache
+├── config.py          # Config loader (TOML + env vars)
+├── models.py          # Arm, PullResult
 ├── http.py            # Sync httpx transport
 ├── store.py           # SQLite WAL event store
 ├── _worker.py         # Background sync + flush thread
-└── engine/            # Pure math (copied from backend)
-    ├── constants.py   # Optimization betas, reward ceilings
-    ├── features.py    # ArmIdentity, ArmIndexMap, FeatureTransformer
-    └── linalg.py      # sample_thompson, score_arms
+├── cli.py             # CLI dispatcher (init, create, ui)
+├── cli_init.py        # bandito init
+├── cli_create.py      # bandito create
+├── engine/            # Pure math (copied from backend)
+│   ├── constants.py
+│   ├── features.py
+│   └── linalg.py
+└── tui/               # Terminal UI (Textual)
+    ├── app.py
+    ├── api.py
+    ├── screens/
+    └── widgets/
+```
+
+## Development
+
+```bash
+uv sync              # Install dependencies
+uv run pytest -q     # Run tests (95 tests)
 ```

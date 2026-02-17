@@ -28,6 +28,7 @@ from bandito.engine import (
     sample_thompson,
     score_arms,
 )
+from bandito.config import DEFAULT_BASE_URL
 from bandito.http import BanditoHTTP
 from bandito.models import Arm, PullResult, _BanditCache
 from bandito.store import EventStore
@@ -42,7 +43,6 @@ except Exception:
 logger = logging.getLogger("bandito")
 logger.addHandler(logging.NullHandler())
 
-DEFAULT_BASE_URL = "https://api.bandito.dev"
 DEFAULT_STORE_PATH = str(Path.home() / ".bandito" / "events.db")
 
 
