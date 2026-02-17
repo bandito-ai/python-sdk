@@ -8,7 +8,7 @@ Terminal scoring workbench for grading LLM responses. Ships inside the SDK packa
 # From sdk/
 uv sync
 uv pip install -e .
-bandito ui
+bandito tui
 ```
 
 For local development, set the base URL in `~/.bandito/config.toml`:

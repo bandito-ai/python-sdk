@@ -8,7 +8,7 @@ Usage: bandito <command>
 Commands:
   init     Configure API key and validate connection
   create   Create a new bandit with arms
-  ui       Launch the TUI scoring workbench
+  tui      Launch the TUI scoring workbench
   help     Show this help message
 """
 
@@ -26,7 +26,7 @@ def main() -> None:
 
         run_create()
 
-    elif command == "ui":
+    elif command == "tui":
         from bandito.tui.app import BanditoApp
 
         app = BanditoApp()

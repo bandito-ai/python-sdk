@@ -60,7 +60,7 @@ bandito.update(
 ### 4. Grade responses
 
 ```bash
-bandito ui
+bandito tui
 ```
 
 Opens the terminal scoring workbench. Review LLM responses and grade them with `y` (good) / `n` (bad). Grades feed back into the bandit to improve future arm selection.
@@ -73,7 +73,7 @@ Usage: bandito <command>
 Commands:
   init     Configure API key and validate connection
   create   Create a new bandit with arms
-  ui       Launch the TUI scoring workbench
+  tui      Launch the TUI scoring workbench
   help     Show this help message
 ```
 
@@ -165,7 +165,7 @@ Shut down the background worker, flush remaining events, and close all connectio
 
 ## TUI Scoring Workbench
 
-Launch with `bandito ui`. On first run it prompts for your API key if `~/.bandito/config.toml` doesn't exist yet.
+Launch with `bandito tui`. On first run it prompts for your API key if `~/.bandito/config.toml` doesn't exist yet.
 
 **Screens:**
 - **Bandit selector** — pick which bandit to review
