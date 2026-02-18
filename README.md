@@ -7,8 +7,14 @@ Includes a terminal UI for reviewing and grading LLM responses.
 ## Installation
 
 ```bash
-pip install git+https://github.com/bandito-dev/bandito-sdk.git
+uv add git+https://github.com/bandito/python-sdk.git
 ```
+or
+
+```bash
+pip install git+https://github.com/bandito/python-sdk.git
+```
+
 
 Requires Python 3.12+.
 
