@@ -1,18 +1,24 @@
 """Bandito SDK — contextual bandit optimization for LLM selection.
 
-Usage:
-    import bandito
+Recommended (context manager):
+    from bandito import BanditoClient
 
-    bandito.connect()  # reads API key from ~/.bandito/config.toml or BANDITO_API_KEY
+    with BanditoClient(api_key="bnd_...") as client:
+        result = client.pull("my-chatbot", query=user_message)
+        response = call_llm(result.model, result.prompt, user_message)
+        client.update(
+            result,
+            response_text=response.text,
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+        )
+
+Module-level singleton (convenience):
+    import bandito
+    bandito.connect()
     result = bandito.pull("my-chatbot", query=user_message)
-    response = openai.chat.completions.create(
-        model=result.model,
-        messages=[
-            {"role": "system", "content": result.prompt},
-            {"role": "user", "content": user_message},
-        ],
-    )
-    bandito.update(result, query_text=user_message, response_text=response_text)
+    ...
+    bandito.close()
 """
 
 import threading
@@ -57,9 +63,30 @@ def pull(bandit_name: str, **kwargs) -> PullResult:
     return _get_client().pull(bandit_name, **kwargs)
 
 
-def update(pull_result: PullResult, **kwargs) -> None:
+def update(
+    pull_result: PullResult,
+    *,
+    query_text: str | None = None,
+    response_text: str | dict | None = None,
+    reward: float | None = None,
+    cost: float | None = None,
+    latency: float | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    segment: dict[str, str] | None = None,
+) -> None:
     """Send event data to cloud (writes to SQLite first)."""
-    _get_client().update(pull_result, **kwargs)
+    _get_client().update(
+        pull_result,
+        query_text=query_text,
+        response_text=response_text,
+        reward=reward,
+        cost=cost,
+        latency=latency,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        segment=segment,
+    )
 
 
 def reward(event_id: str, reward: float, **kwargs) -> None:
@@ -73,7 +100,7 @@ def sync() -> None:
 
 
 def close() -> None:
-    """Shut down worker and close connections."""
+    """Shut down executor and close connections."""
     global _client
     with _lock:
         if _client is not None:

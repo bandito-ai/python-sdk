@@ -22,8 +22,6 @@ def _connected_client() -> BanditoClient:
     client = BanditoClient(
         api_key=API_KEY,
         base_url=BASE_URL,
-        flush_interval=9999,
-        sync_interval=9999,
         store_path=":memory:",
     )
     client.connect()
@@ -83,7 +81,7 @@ class TestUpdate:
             assert event["output_tokens"] == 200
             assert event["segment"] == {"tier": "pro"}
             assert event["query_text"] == "q"
-            assert event["response_text"] == "r"
+            assert event["response_text"] == {"response": "r"}
         finally:
             client.close()
 
@@ -139,6 +137,66 @@ class TestUpdate:
             client.update(result, reward=0.0)
             event = client._store.pending()[0]
             assert event["immediate_reward"] == 0.0
+        finally:
+            client.close()
+
+
+class TestResponseTextNormalization:
+    """Verify response_text is normalized to dict before storage."""
+
+    @respx.mock
+    def test_string_normalized_to_dict(self):
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result, response_text="hello")
+            event = client._store.pending()[0]
+            assert event["response_text"] == {"response": "hello"}
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_dict_stored_as_is(self):
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            rich = {"choices": [{"text": "Hi"}], "usage": {"tokens": 5}}
+            client.update(result, response_text=rich)
+            event = client._store.pending()[0]
+            assert event["response_text"] == rich
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_none_omitted(self):
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result)
+            event = client._store.pending()[0]
+            assert "response_text" not in event
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_cloud_payload_preserves_dict(self):
+        """Verify the dict structure survives through to the cloud payload."""
+        ingest_route = respx.post(f"{BASE_URL}/api/v1/events").mock(
+            return_value=httpx.Response(201, json={
+                "accepted": 1, "duplicates": 0, "errors": [],
+            })
+        )
+        client = _connected_client()
+        client._data_storage = "cloud"
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result, response_text="hello")
+            client._executor.shutdown(wait=True)
+            client._executor = None
+
+            body = json.loads(ingest_route.calls[0].request.content)
+            event = body["events"][0]
+            assert event["response_text"] == {"response": "hello"}
         finally:
             client.close()
 

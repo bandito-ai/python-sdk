@@ -89,7 +89,7 @@ class TestInitSavesConfig:
 
     @respx.mock
     def test_default_local_storage(self, config_dir, monkeypatch):
-        """Default (N) → data_storage omitted from config (local is default)."""
+        """Default (N) → data_storage written as 'local' (self-documenting config)."""
         monkeypatch.setattr(getpass, "getpass", lambda _: "bnd_key")
         monkeypatch.setattr("builtins.input", lambda _: "")
 
@@ -102,7 +102,7 @@ class TestInitSavesConfig:
         run_init()
 
         content = (config_dir / "config.toml").read_text()
-        assert "data_storage" not in content  # default omitted
+        assert 'data_storage = "local"' in content  # always written
 
 
 class TestInitUsesEnvVar:

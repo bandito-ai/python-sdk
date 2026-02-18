@@ -96,7 +96,16 @@ bandito.connect(api_key="bnd_...")
 result = bandito.pull("my-chatbot")
 ```
 
-**Explicit client** (testing, multiple instances, DI):
+**Explicit client with context manager** (recommended):
+
+```python
+from bandito import BanditoClient
+
+with BanditoClient(api_key="bnd_...") as client:
+    result = client.pull("my-chatbot")
+```
+
+**Explicit connect/close** (testing, long-running servers):
 
 ```python
 from bandito import BanditoClient
@@ -104,18 +113,17 @@ from bandito import BanditoClient
 client = BanditoClient(api_key="bnd_...")
 client.connect()
 result = client.pull("my-chatbot")
+client.close()
 ```
 
 ### `connect(api_key=None, **kwargs)`
 
-Bootstrap the SDK. Authenticates with the cloud, fetches all bandit state, flushes any pending events from a previous crash, and starts the background sync worker.
+Bootstrap the SDK. Authenticates with the cloud, fetches all bandit state, and flushes any pending events from a previous crash.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `api_key` | `str` | `BANDITO_API_KEY` env | API key for authentication |
 | `base_url` | `str` | `http://localhost:8000` | Cloud API base URL |
-| `sync_interval` | `float` | `30.0` | Seconds between background heartbeats |
-| `flush_interval` | `float` | `5.0` | Seconds between background event flushes |
 | `store_path` | `str` | `~/.bandito/events.db` | Path to SQLite file for event durability |
 | `data_storage` | `str` | `"local"` | `"local"` keeps query/response text local-only; `"cloud"` sends it to the server |
 
@@ -137,13 +145,13 @@ Returns a `PullResult` with:
 
 ### `update(pull_result, **kwargs)`
 
-Report event data. Writes to local SQLite first (crash-safe), then the background worker flushes to cloud.
+Report event data. Writes to local SQLite first (crash-safe), then submits a non-blocking background flush to cloud.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `pull_result` | `PullResult` | Result from `pull()` |
 | `query_text` | `str` | The user's query |
-| `response_text` | `str` | The LLM's response |
+| `response_text` | `str \| dict` | The LLM's response. Strings are auto-wrapped as `{"response": "..."}` |
 | `reward` | `float` | Immediate reward (0.0-1.0) |
 | `cost` | `float` | Cost in dollars |
 | `latency` | `float` | Latency in milliseconds |
@@ -163,11 +171,11 @@ Send a delayed reward for an existing event. Synchronous HTTP call — blocks un
 
 ### `sync()`
 
-Explicit state refresh from cloud. The background worker does this automatically every `sync_interval` seconds.
+Explicit state refresh from cloud. Call periodically (e.g. every 30s) in long-running servers to pick up updated weights.
 
 ### `close()`
 
-Shut down the background worker, flush remaining events, and close all connections.
+Shut down the background flush executor, flush remaining events, and close all connections.
 
 ## TUI Scoring Workbench
 
@@ -240,7 +248,7 @@ bandito/
 ├── models.py          # Arm, PullResult
 ├── http.py            # Sync httpx transport
 ├── store.py           # SQLite WAL event store
-├── _worker.py         # Background sync + flush thread
+├── _worker.py         # Cloud payload utilities
 ├── cli.py             # CLI dispatcher (init, create, ui)
 ├── cli_init.py        # bandito init
 ├── cli_create.py      # bandito create

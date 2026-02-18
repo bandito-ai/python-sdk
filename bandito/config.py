@@ -56,7 +56,6 @@ def save_config(
     lines = [f'api_key = "{api_key}"']
     if base_url != DEFAULT_BASE_URL:
         lines.append(f'base_url = "{base_url}"')
-    if data_storage != "local":
-        lines.append(f'data_storage = "{data_storage}"')
+    lines.append(f'data_storage = "{data_storage}"')
     CONFIG_FILE.write_text("\n".join(lines) + "\n")
     CONFIG_FILE.chmod(0o600)

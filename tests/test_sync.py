@@ -17,8 +17,6 @@ def _make_client(**kwargs) -> BanditoClient:
     return BanditoClient(
         api_key=API_KEY,
         base_url=BASE_URL,
-        flush_interval=9999,  # disable auto-flush in tests
-        sync_interval=9999,   # disable auto-sync in tests
         store_path=":memory:",
         **kwargs,
     )

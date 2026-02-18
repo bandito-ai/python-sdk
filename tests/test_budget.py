@@ -18,8 +18,6 @@ def _make_client() -> BanditoClient:
     return BanditoClient(
         api_key=API_KEY,
         base_url=BASE_URL,
-        flush_interval=9999,
-        sync_interval=9999,
         store_path=":memory:",
     )
 

@@ -1,8 +1,8 @@
 """BanditoClient — main orchestrator for the SDK.
 
-Sync-first API: no `await` anywhere in the user-facing surface.
-pull() is pure local math (<1ms). update() writes to SQLite first.
-Background thread handles event flush + periodic heartbeat.
+Sync-first API: no ``await`` anywhere in the user-facing surface.
+``pull()`` is pure local math (<1ms). ``update()`` writes to SQLite first,
+then submits a non-blocking flush to a single-threaded executor.
 """
 
 from __future__ import annotations
@@ -12,12 +12,13 @@ import math
 import os
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from bandito._worker import BackgroundWorker, strip_text_fields
+from bandito._worker import prepare_cloud_payload
 from bandito.engine import (
     DEFAULT_RELATIVE_LATENCY,
     MIN_QUERY_LENGTH,
@@ -44,25 +45,34 @@ logger = logging.getLogger("bandito")
 logger.addHandler(logging.NullHandler())
 
 DEFAULT_STORE_PATH = str(Path.home() / ".bandito" / "events.db")
+_MAX_EVENT_RETRIES = 5  # after this many server rejections, skip the event
 
 
 class BanditoClient:
     """Core SDK client. Sync-first, thread-safe.
 
-    API key resolution order: constructor arg → BANDITO_API_KEY env var
-    → ~/.bandito/config.toml (written by `bandito init`).
+    Recommended usage (context manager):
 
-    Two usage patterns:
-        # Pattern 1: module-level singleton (reads config automatically)
-        import bandito
-        bandito.connect()
-        result = bandito.pull("my-chatbot")
-
-        # Pattern 2: explicit client (testing, DI)
         from bandito import BanditoClient
+
+        with BanditoClient(api_key="bnd_...") as client:
+            result = client.pull("my-chatbot", query=user_message)
+            response = call_llm(result.model, result.prompt, user_message)
+            client.update(result, response_text=response.text)
+
+    Explicit connect/close:
+
         client = BanditoClient(api_key="bnd_...")
         client.connect()
-        result = client.pull("my-chatbot")
+        ...
+        client.close()
+
+    API key resolution order: constructor arg -> BANDITO_API_KEY env var
+    -> ~/.bandito/config.toml (written by ``bandito init``).
+
+    ``data_storage`` controls whether query/response text is sent to the
+    cloud API. Resolution: constructor arg -> config.toml -> default "local".
+    Text is always stored in local SQLite regardless of this setting.
     """
 
     def __init__(
@@ -70,39 +80,44 @@ class BanditoClient:
         api_key: str | None = None,
         base_url: str | None = None,
         *,
-        sync_interval: float = 30.0,
-        flush_interval: float = 5.0,
         store_path: str | None = None,
         data_storage: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url
-        self._sync_interval = sync_interval
-        self._flush_interval = flush_interval
         self._store_path = store_path
         self._data_storage_arg = data_storage
 
         self._http: BanditoHTTP | None = None
         self._store: EventStore | None = None
-        self._worker: BackgroundWorker | None = None
-        self._bandits: dict[str, _BanditCache] = {}  # name → cache
+        self._executor: ThreadPoolExecutor | None = None
+        self._bandits: dict[str, _BanditCache] = {}  # name -> cache
         self._lock = threading.Lock()
         self._connected = False
         self._data_storage = data_storage or "local"
         self._rng = np.random.default_rng()
+        self._dead_uuids: set[str] = set()  # events permanently rejected by server
+        self._retry_counts: dict[str, int] = {}  # uuid -> rejection count
+
+    def __enter__(self) -> BanditoClient:
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
 
     def connect(self) -> None:
         """Bootstrap: authenticate and hydrate in-memory state from cloud.
 
-        Reads api_key from constructor arg → BANDITO_API_KEY env var →
+        Reads api_key from constructor arg -> BANDITO_API_KEY env var ->
         ~/.bandito/config.toml. Creates HTTP client, SQLite store, fetches
-        full state, starts background worker.
+        full state, and creates the background flush executor.
         """
         # Tear down previous connection if reconnecting
         if self._connected:
             self.close()
 
-        # Resolve config: constructor arg → env var → config.toml → default
+        # Resolve config: constructor arg -> env var -> config.toml -> default
         from bandito.config import load_config
         config = load_config()
 
@@ -129,19 +144,17 @@ class BanditoClient:
         with self._lock:
             self._apply_sync(data)
 
+        # Reset retry state — reconnect gives previously-rejected events another chance
+        self._dead_uuids.clear()
+        self._retry_counts.clear()
+
         # Flush any events pending from a previous crash
         self._flush_pending()
 
-        # Start background worker
-        self._worker = BackgroundWorker(
-            self._http,
-            self._store,
-            self._on_sync,
-            sync_interval=self._sync_interval,
-            flush_interval=self._flush_interval,
-            data_storage=self._data_storage,
-        )
-        self._worker.start()
+        # Create executor for non-blocking event flushes.
+        # Python's atexit automatically calls shutdown(wait=True) on live
+        # executors, so pending flushes complete before process exit.
+        self._executor = ThreadPoolExecutor(max_workers=1)
         self._connected = True
 
         logger.info("Connected — %d bandits", len(self._bandits))
@@ -230,7 +243,7 @@ class BanditoClient:
         pull_result: PullResult,
         *,
         query_text: str | None = None,
-        response_text: str | None = None,
+        response_text: str | dict | None = None,
         reward: float | None = None,
         cost: float | None = None,
         latency: float | None = None,
@@ -238,17 +251,35 @@ class BanditoClient:
         output_tokens: int | None = None,
         segment: dict[str, str] | None = None,
     ) -> None:
-        """Send event data to cloud. Writes to SQLite first (crash-safe).
+        """Record an LLM call outcome. Writes to SQLite first (crash-safe),
+        then submits a non-blocking flush to the background executor.
+
+        Cost handling: if ``cost`` is omitted but both ``input_tokens`` and
+        ``output_tokens`` are provided, the server auto-calculates cost from
+        the arm's model pricing. An explicit ``cost`` always wins.
+
+        Text storage: ``query_text`` and ``response_text`` are always saved
+        to local SQLite (for TUI grading). Whether they are also sent to
+        the cloud depends on the ``data_storage`` setting ("local" keeps
+        them local-only; "cloud" sends them).
+
+        For delayed or human-graded rewards, use ``bandito.reward()`` instead
+        of the ``reward`` parameter here.
 
         Args:
             pull_result: Result from pull().
             query_text: The user's query text.
-            response_text: The LLM's response text.
+            response_text: The LLM's response text. Accepts a string or
+                dict. Strings are normalized to ``{"response": "..."}``
+                before storage.
             reward: Immediate reward (0.0-1.0).
-            cost: Cost in dollars.
+            cost: Cost in dollars. Omit to let the server auto-calculate
+                from token counts.
             latency: Latency in milliseconds.
-            input_tokens: Input token count.
-            output_tokens: Output token count.
+            input_tokens: Input token count (enables auto-cost when cost
+                is omitted).
+            output_tokens: Output token count (enables auto-cost when cost
+                is omitted).
             segment: Key-value segment tags.
         """
         self._ensure_connected()
@@ -263,9 +294,12 @@ class BanditoClient:
         if query_text is not None:
             event["query_text"] = query_text
         if response_text is not None:
-            event["response_text"] = response_text
+            if isinstance(response_text, str):
+                event["response_text"] = {"response": response_text}
+            else:
+                event["response_text"] = response_text
         if reward is not None:
-            event["immediate_reward"] = reward
+            event["immediate_reward"] = reward  # backend schema field name
         if cost is not None:
             event["cost"] = cost
         if latency is not None:
@@ -280,9 +314,9 @@ class BanditoClient:
         # Write to SQLite WAL first — survives crashes
         self._store.push(event)
 
-        # Wake background worker for immediate flush
-        if self._worker:
-            self._worker.trigger_flush()
+        # Submit non-blocking flush to executor
+        if self._executor:
+            self._executor.submit(self._flush_pending)
 
     def reward(
         self,
@@ -312,12 +346,12 @@ class BanditoClient:
         logger.info("Manual sync — %d bandits", len(self._bandits))
 
     def close(self) -> None:
-        """Shut down worker, flush remaining events, close connections."""
-        if self._worker:
-            self._worker.stop()
-            self._worker = None
+        """Shut down executor, flush remaining events, close connections."""
+        if self._executor:
+            self._executor.shutdown(wait=True)
+            self._executor = None
 
-        # Final flush attempt
+        # Final synchronous flush — catches anything the last submit missed
         if self._store and self._http:
             self._flush_pending()
 
@@ -329,7 +363,7 @@ class BanditoClient:
             self._http = None
         self._connected = False
 
-    # ── Internal ──────────────────────────────────────────────────────
+    # -- Internal ----------------------------------------------------------
 
     def _ensure_connected(self) -> None:
         if not self._connected:
@@ -423,21 +457,58 @@ class BanditoClient:
                 bandit_name, cache.total_cost, cache.budget, pct,
             )
 
-    def _on_sync(self, data: dict[str, Any]) -> None:
-        """Callback from background worker when heartbeat succeeds."""
-        with self._lock:
-            self._apply_sync(data)
-
     def _flush_pending(self) -> None:
-        """Attempt to flush pending SQLite events to cloud."""
+        """Attempt to flush pending SQLite events to cloud.
+
+        Handles partial acceptance: events the server accepted or
+        deduplicated are marked flushed. Events the server rejected are
+        retried up to ``_MAX_EVENT_RETRIES`` times, then marked as dead
+        (skipped on future flushes until reconnect).
+        """
         try:
             pending = self._store.pending()
             if not pending:
                 return
-            payload = strip_text_fields(pending) if self._data_storage == "local" else pending
-            self._http.ingest_events(payload)
-            uuids = [e["local_event_uuid"] for e in pending]
-            self._store.mark_flushed(uuids)
-            logger.debug("Flushed %d pending events on connect/close", len(pending))
+
+            # Skip events already known to be permanently rejected
+            if self._dead_uuids:
+                pending = [e for e in pending if e["local_event_uuid"] not in self._dead_uuids]
+                if not pending:
+                    return
+
+            payload = prepare_cloud_payload(pending, include_text=(self._data_storage != "local"))
+            result = self._http.ingest_events(payload)
+
+            # Parse per-event errors from server response
+            errored_uuids: set[str] = set()
+            for err in result.get("errors", []):
+                uid = err.get("local_event_uuid")
+                if uid:
+                    errored_uuids.add(uid)
+                    count = self._retry_counts.get(uid, 0) + 1
+                    self._retry_counts[uid] = count
+                    if count >= _MAX_EVENT_RETRIES:
+                        self._dead_uuids.add(uid)
+                        logger.warning(
+                            "Event %s permanently rejected after %d attempts: %s",
+                            uid, count, err.get("reason", "unknown"),
+                        )
+                    else:
+                        logger.debug(
+                            "Event %s rejected (attempt %d/%d): %s",
+                            uid, count, _MAX_EVENT_RETRIES, err.get("reason", "unknown"),
+                        )
+
+            # Mark accepted + deduplicated events as flushed
+            flushed_uuids = [
+                e["local_event_uuid"] for e in pending
+                if e["local_event_uuid"] not in errored_uuids
+            ]
+            if flushed_uuids:
+                self._store.mark_flushed(flushed_uuids)
+            logger.debug(
+                "Flushed %d events (errors=%d, dead=%d)",
+                len(flushed_uuids), len(errored_uuids), len(self._dead_uuids),
+            )
         except Exception:
             logger.warning("Failed to flush pending events", exc_info=True)

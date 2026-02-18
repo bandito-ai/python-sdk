@@ -1,119 +1,24 @@
-"""Background daemon thread — periodic sync heartbeat + event flush."""
+"""Payload utilities for cloud event ingestion."""
 
 from __future__ import annotations
 
-import logging
-import threading
-import time
-from typing import TYPE_CHECKING, Callable
-
-if TYPE_CHECKING:
-    from bandito.http import BanditoHTTP
-    from bandito.store import EventStore
-
-logger = logging.getLogger("bandito")
-
 _TEXT_FIELDS = ("query_text", "response_text")
+_METADATA_FIELDS = ("model_name", "model_provider")
 
 
-def strip_text_fields(events: list[dict]) -> list[dict]:
-    """Return shallow copies of events with query_text/response_text removed."""
+def prepare_cloud_payload(events: list[dict], *, include_text: bool) -> list[dict]:
+    """Return shallow copies of events ready for cloud ingest.
+
+    Always strips model_name/model_provider (only needed in local SQLite for TUI).
+    Strips query_text/response_text when include_text is False (data_storage="local").
+    """
     stripped = []
     for e in events:
         copy = e.copy()
-        for field in _TEXT_FIELDS:
+        for field in _METADATA_FIELDS:
             copy.pop(field, None)
+        if not include_text:
+            for field in _TEXT_FIELDS:
+                copy.pop(field, None)
         stripped.append(copy)
     return stripped
-
-
-class BackgroundWorker:
-    """Single daemon thread that handles:
-
-    1. Flushing pending events from SQLite to cloud (every flush_interval seconds)
-    2. Periodic heartbeat / state refresh (every sync_interval seconds)
-
-    Both survive HTTP errors — the thread logs warnings and retries next cycle.
-    """
-
-    def __init__(
-        self,
-        http: BanditoHTTP,
-        store: EventStore,
-        on_sync: Callable[[dict], None],
-        *,
-        sync_interval: float = 30.0,
-        flush_interval: float = 5.0,
-        data_storage: str = "local",
-    ) -> None:
-        self._http = http
-        self._store = store
-        self._on_sync = on_sync
-        self._sync_interval = sync_interval
-        self._flush_interval = flush_interval
-        self._data_storage = data_storage
-        self._stop_event = threading.Event()
-        self._wake_event = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        self._stop_event.clear()
-        self._wake_event.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._wake_event.set()  # wake up so it exits promptly
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
-
-    def trigger_flush(self) -> None:
-        """Wake the worker to flush events immediately."""
-        self._wake_event.set()
-
-    def _run(self) -> None:
-        last_sync = time.monotonic()
-        while not self._stop_event.is_set():
-            # Sleep until timeout or trigger_flush() wakes us
-            self._wake_event.wait(timeout=self._flush_interval)
-            self._wake_event.clear()
-
-            if self._stop_event.is_set():
-                break
-
-            # Flush pending events
-            self._flush()
-
-            # Heartbeat on schedule (uses actual elapsed time, not assumed interval)
-            if time.monotonic() - last_sync >= self._sync_interval:
-                self._heartbeat()
-                last_sync = time.monotonic()
-
-    def _flush(self) -> None:
-        try:
-            pending = self._store.pending()
-            if not pending:
-                return
-            payload = strip_text_fields(pending) if self._data_storage == "local" else pending
-            result = self._http.ingest_events(payload)
-            # Mark all sent events as flushed (server handles dedup)
-            uuids = [e["local_event_uuid"] for e in pending]
-            self._store.mark_flushed(uuids)
-            logger.debug(
-                "Flushed %d events (accepted=%d, duplicates=%d)",
-                len(pending),
-                result.get("accepted", 0),
-                result.get("duplicates", 0),
-            )
-        except Exception:
-            logger.warning("Event flush failed — will retry next cycle", exc_info=True)
-
-    def _heartbeat(self) -> None:
-        try:
-            data = self._http.heartbeat()
-            self._on_sync(data)
-            logger.debug("Heartbeat sync: %d bandits", len(data.get("bandits", [])))
-        except Exception:
-            logger.warning("Heartbeat failed — continuing with stale weights", exc_info=True)

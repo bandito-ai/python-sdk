@@ -13,6 +13,7 @@ from textual import work
 from textual.worker import Worker, WorkerState
 
 from bandito.tui.widgets.arm_table import ArmTable
+from bandito.tui.utils import format_response_text
 from bandito.tui.widgets.event_card import EventCard
 from bandito.tui.widgets.stats_panel import StatsPanel
 
@@ -346,7 +347,7 @@ class DashboardScreen(Screen):
             event_data.get("query_text", "[no query text]")
         )
         self.query_one("#detail-response-text", Static).update(
-            event_data.get("response_text", "[no response text]")
+            format_response_text(event_data.get("response_text"))
         )
 
         prompt = event_data.get("system_prompt")

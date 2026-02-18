@@ -34,8 +34,6 @@ def _connected_client(sync_data=None) -> BanditoClient:
     client = BanditoClient(
         api_key=API_KEY,
         base_url=BASE_URL,
-        flush_interval=9999,
-        sync_interval=9999,
         store_path=":memory:",
     )
     client.connect()

@@ -10,6 +10,8 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+from bandito.tui.utils import format_response_text
+
 
 class EventDetailScreen(ModalScreen[float | None]):
     """Modal showing full event payload. Returns grade or None."""
@@ -99,7 +101,7 @@ class EventDetailScreen(ModalScreen[float | None]):
                 )
                 yield Static("RESPONSE", classes="detail-section-header")
                 yield Static(
-                    ev.get("response_text", "[no response text]"),
+                    format_response_text(ev.get("response_text")),
                     classes="detail-text",
                 )
 
