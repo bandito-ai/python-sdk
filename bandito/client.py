@@ -49,10 +49,13 @@ DEFAULT_STORE_PATH = str(Path.home() / ".bandito" / "events.db")
 class BanditoClient:
     """Core SDK client. Sync-first, thread-safe.
 
+    API key resolution order: constructor arg → BANDITO_API_KEY env var
+    → ~/.bandito/config.toml (written by `bandito init`).
+
     Two usage patterns:
-        # Pattern 1: module-level singleton
+        # Pattern 1: module-level singleton (reads config automatically)
         import bandito
-        bandito.connect(api_key="bnd_...")
+        bandito.connect()
         result = bandito.pull("my-chatbot")
 
         # Pattern 2: explicit client (testing, DI)
@@ -91,26 +94,29 @@ class BanditoClient:
     def connect(self) -> None:
         """Bootstrap: authenticate and hydrate in-memory state from cloud.
 
-        Reads api_key from constructor arg or BANDITO_API_KEY env var.
-        Creates HTTP client, SQLite store, fetches full state, starts
-        background worker.
+        Reads api_key from constructor arg → BANDITO_API_KEY env var →
+        ~/.bandito/config.toml. Creates HTTP client, SQLite store, fetches
+        full state, starts background worker.
         """
         # Tear down previous connection if reconnecting
         if self._connected:
             self.close()
 
-        api_key = self._api_key or os.environ.get("BANDITO_API_KEY")
+        # Resolve config: constructor arg → env var → config.toml → default
+        from bandito.config import load_config
+        config = load_config()
+
+        api_key = self._api_key or config.api_key
         if not api_key:
-            raise ValueError("api_key required — pass it or set BANDITO_API_KEY")
+            raise ValueError(
+                "api_key required — pass it to connect(), set BANDITO_API_KEY, "
+                "or run `bandito init`"
+            )
 
-        base_url = self._base_url or os.environ.get(
-            "BANDITO_BASE_URL", DEFAULT_BASE_URL
-        )
+        base_url = self._base_url or config.base_url
 
-        # Resolve data_storage: constructor arg → config file → "local" default
         if not self._data_storage_arg:
-            from bandito.config import load_config
-            self._data_storage = load_config().data_storage
+            self._data_storage = config.data_storage
 
         self._http = BanditoHTTP(base_url, api_key)
         store_path = self._store_path or DEFAULT_STORE_PATH

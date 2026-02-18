@@ -3,7 +3,7 @@
 Usage:
     import bandito
 
-    bandito.connect(api_key="bnd_...")
+    bandito.connect()  # reads API key from ~/.bandito/config.toml or BANDITO_API_KEY
     result = bandito.pull("my-chatbot", query=user_message)
     response = openai.chat.completions.create(
         model=result.model,

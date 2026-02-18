@@ -97,7 +97,13 @@ class TestConnect:
         finally:
             client.close()
 
-    def test_connect_missing_api_key_raises(self):
+    def test_connect_missing_api_key_raises(self, monkeypatch):
+        from bandito.config import BanditoConfig
+        monkeypatch.setattr(
+            "bandito.config.load_config",
+            lambda: BanditoConfig(),  # no api_key
+        )
+        monkeypatch.delenv("BANDITO_API_KEY", raising=False)
         client = BanditoClient()
         with pytest.raises(ValueError, match="api_key required"):
             client.connect()
