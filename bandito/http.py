@@ -47,6 +47,13 @@ class BanditoHTTP:
                 return resp.json()
             except Exception as exc:
                 last_exc = exc
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+                    # Log full response body for client errors (4xx) — critical for debugging
+                    # Pydantic 422 validation errors, auth failures, etc.
+                    logger.warning(
+                        "%s %s → %d: %s",
+                        method, path, exc.response.status_code, exc.response.text,
+                    )
                 if not _is_retryable(exc) or attempt == MAX_RETRIES - 1:
                     raise
                 delay = RETRY_BACKOFF_BASE * (2 ** attempt)

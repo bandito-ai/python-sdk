@@ -477,6 +477,7 @@ class BanditoClient:
                     return
 
             payload = prepare_cloud_payload(pending, include_text=(self._data_storage != "local"))
+            logger.debug("Flush payload: %s", payload)
             result = self._http.ingest_events(payload)
 
             # Parse per-event errors from server response
