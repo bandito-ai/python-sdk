@@ -16,19 +16,24 @@ HELP_TEXT = """\
   [bold cyan]q[/]         Quit
   [bold cyan]Escape[/]    Go back
   [bold cyan]Enter[/]     Select / open detail
-  [bold cyan]Tab[/]       Next tab
-  [bold cyan]Shift+Tab[/] Previous tab
-
-[bold]Grading[/bold]
-  [bold green]y[/]         Grade good (1.0)
-  [bold red]n[/]         Grade bad (0.0)
-
-[bold]Lists[/bold]
   [bold cyan]j / Down[/]  Move down
   [bold cyan]k / Up[/]    Move up
   [bold cyan]r[/]         Refresh data
 
-[bold cyan]?[/]         Toggle this help
+[bold]Grading[/bold]
+  [bold green]y[/]         Grade good (1.0)
+  [bold red]n[/]         Grade bad (0.0)
+  [bold cyan]s[/]         Skip event
+  [bold cyan]Space[/]     Toggle select
+  [bold cyan]a[/]         Select all
+  [bold cyan]g[/]         Toggle graded/ungraded
+
+[bold]View[/bold]
+  [bold cyan]t[/]         Toggle sidebar
+  [bold cyan]c[/]         Copy all (query + response + prompt)
+  [bold cyan]?[/]         Toggle this help
+
+[dim]Click any text section to copy it individually[/]
 """
 
 

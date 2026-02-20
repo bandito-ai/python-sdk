@@ -13,6 +13,7 @@ from textual import work
 from textual.worker import Worker, WorkerState
 
 from bandito.tui.widgets.arm_table import ArmTable
+from bandito.tui.widgets.copyable_text import CopyableText
 from bandito.tui.utils import format_response_text
 from bandito.tui.widgets.event_card import EventCard
 from bandito.tui.widgets.stats_panel import StatsPanel
@@ -120,6 +121,7 @@ class DashboardScreen(Screen):
         Binding("g", "toggle_graded", "Graded", show=True),
         Binding("j", "cursor_down", show=False),
         Binding("k", "cursor_up", show=False),
+        Binding("c", "copy_all", "Copy", show=True),
         Binding("question_mark", "show_help", "Help", show=True, key_display="?"),
         Binding("q", "quit_app", "Quit", show=True),
     ]
@@ -143,12 +145,12 @@ class DashboardScreen(Screen):
                 yield ListView(id="grading-list")
             with VerticalScroll(id="detail-pane"):
                 yield Static("", id="detail-meta")
-                yield Static("QUERY", classes="detail-section-header")
-                yield Static("", id="detail-query-text", classes="detail-text")
-                yield Static("RESPONSE", classes="detail-section-header")
-                yield Static("", id="detail-response-text", classes="detail-text")
-                yield Static("SYSTEM PROMPT", classes="detail-section-header", id="detail-prompt-header")
-                yield Static("", id="detail-prompt-text", classes="detail-text")
+                yield Static("QUERY [dim italic](click to copy)[/]", classes="detail-section-header")
+                yield CopyableText("", id="detail-query-text", classes="detail-text")
+                yield Static("RESPONSE [dim italic](click to copy)[/]", classes="detail-section-header")
+                yield CopyableText("", id="detail-response-text", classes="detail-text")
+                yield Static("SYSTEM PROMPT [dim italic](click to copy)[/]", classes="detail-section-header", id="detail-prompt-header")
+                yield CopyableText("", id="detail-prompt-text", classes="detail-text")
                 yield Static(
                     "[bold green]y[/] Good  [bold red]n[/] Bad  "
                     "[bold]s[/] Skip  [bold]Space[/] Select",
@@ -166,7 +168,7 @@ class DashboardScreen(Screen):
         )
         yield Static(
             "[dim]esc[/] Back  [dim]r[/] Refresh  [dim]t[/] Sidebar  "
-            "[dim]g[/] Graded  [dim]?[/] Help  [dim]q[/] Quit",
+            "[dim]c[/] Copy  [dim]g[/] Graded  [dim]?[/] Help  [dim]q[/] Quit",
             id="footer-bar",
         )
 
@@ -329,6 +331,8 @@ class DashboardScreen(Screen):
     # ── Detail pane ────────────────────────────────────────────────
 
     def _update_detail_pane(self, event_data: dict[str, Any]) -> None:
+        self._current_event = event_data
+
         uuid = event_data.get("local_event_uuid", "?")
         model = event_data.get("model_name", "?")
         provider = event_data.get("model_provider", "?")
@@ -345,18 +349,24 @@ class DashboardScreen(Screen):
             f"[dim]{uuid[:8]}[/]"
         )
 
-        self.query_one("#detail-query-text", Static).update(
-            event_data.get("query_text", "[no query text]")
-        )
-        self.query_one("#detail-response-text", Static).update(
-            format_response_text(event_data.get("response_text"))
-        )
+        query_str = str(event_data.get("query_text") or "[no query text]")
+        query_widget = self.query_one("#detail-query-text", CopyableText)
+        query_widget.update(query_str)
+        query_widget._raw_text = query_str
+
+        response_str = format_response_text(event_data.get("response_text"))
+        response_widget = self.query_one("#detail-response-text", CopyableText)
+        response_widget.update(response_str)
+        response_widget._raw_text = response_str
 
         prompt = event_data.get("system_prompt")
         if prompt:
+            prompt_str = str(prompt)
             self.query_one("#detail-prompt-header").styles.display = "block"
-            self.query_one("#detail-prompt-text").styles.display = "block"
-            self.query_one("#detail-prompt-text", Static).update(prompt)
+            prompt_widget = self.query_one("#detail-prompt-text", CopyableText)
+            prompt_widget.styles.display = "block"
+            prompt_widget.update(prompt_str)
+            prompt_widget._raw_text = prompt_str
         else:
             self.query_one("#detail-prompt-header").styles.display = "none"
             self.query_one("#detail-prompt-text").styles.display = "none"
@@ -559,6 +569,26 @@ class DashboardScreen(Screen):
         self._refresh_grading_queue()
         label = "all events" if self._show_graded else "ungraded only"
         self.app.notify(f"Showing {label}")
+
+    def action_copy_all(self) -> None:
+        ev = getattr(self, "_current_event", None)
+        if ev is None:
+            return
+        parts = []
+        query = ev.get("query_text")
+        if query:
+            parts.append(f"QUERY:\n{query}")
+        response = ev.get("response_text")
+        if response:
+            parts.append(f"RESPONSE:\n{format_response_text(response)}")
+        prompt = ev.get("system_prompt")
+        if prompt:
+            parts.append(f"SYSTEM PROMPT:\n{prompt}")
+        try:
+            self.app.copy_to_clipboard("\n\n".join(parts))
+            self.app.notify("Copied all to clipboard", severity="information")
+        except Exception:
+            self.app.notify("Copy to clipboard failed", severity="warning")
 
     def action_toggle_sidebar(self) -> None:
         self._toggle_sidebar()
