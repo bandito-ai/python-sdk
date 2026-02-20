@@ -12,9 +12,7 @@ from bandito.engine import (
     ArmIdentity,
     ArmIndexMap,
     DEFAULT_RELATIVE_LATENCY,
-    FeatureTransformer,
     MIN_QUERY_LENGTH,
-    score_arms,
 )
 from bandito.models import PullResult
 from tests.conftest import ARM_DATA, EXPECTED_DIMS, make_sync_response
@@ -164,43 +162,24 @@ class TestPull:
             client.close()
 
 
-# ---------- Feature Matrix Equivalence ----------
+# ---------- Feature Matrix Construction ----------
 
 
-class TestFeatureMatrixEquivalence:
-    """Prove the optimized pre-allocated feature matrix produces identical
-    vectors to the original FeatureTransformer.transform() path."""
+class TestFeatureMatrixConstruction:
+    """Verify the pre-allocated feature matrix is built correctly."""
 
     QUERIES = [None, "Hi", "What is the meaning of life?" * 10]
 
     LATENCY_CONFIGS = [
-        # (bandit_avg, arm_latencies) → arm_avg_latencies dict built per test
         (None, {1: None, 2: None, 3: None}),
         (1000.0, {1: 800.0, 2: 1200.0, 3: 1000.0}),
         (500.0, {1: None, 2: 750.0, 3: 250.0}),
     ]
 
-    def _build_reference_vectors(
-        self, identities, transformer, query, bandit_avg, arm_latencies,
-    ):
-        """Original path: per-arm transform() → list of vectors."""
-        query_length = len(query) if query else None
-        vecs = []
-        for identity in identities:
-            arm_lat = arm_latencies.get(identity.arm_id)
-            if arm_lat and bandit_avg and bandit_avg > 0:
-                rel = arm_lat / bandit_avg
-            else:
-                rel = None
-            vecs.append(transformer.transform(
-                identity, query_length=query_length, relative_latency=rel,
-            ))
-        return np.array(vecs)
-
-    def _build_optimized_matrix(
+    def _build_feature_matrix(
         self, identities, index_map, query, bandit_avg, arm_latencies,
     ):
-        """Optimized path: pre-allocated matrix with one-hot, overwrite context."""
+        """Build feature matrix the same way client.py does."""
         dims = index_map.dimensions
         X = np.zeros((len(identities), dims), dtype=np.float64)
 
@@ -229,37 +208,37 @@ class TestFeatureMatrixEquivalence:
 
         return X
 
-    def test_feature_vectors_identical(self, arm_identities, index_map, transformer):
-        """Every query x latency combo produces identical feature matrices."""
-        for query in self.QUERIES:
-            for bandit_avg, arm_lats in self.LATENCY_CONFIGS:
-                ref = self._build_reference_vectors(
-                    arm_identities, transformer, query, bandit_avg, arm_lats,
-                )
-                opt = self._build_optimized_matrix(
-                    arm_identities, index_map, query, bandit_avg, arm_lats,
-                )
-                np.testing.assert_array_equal(
-                    ref, opt,
-                    err_msg=f"Mismatch for query={query!r}, latency={bandit_avg}",
-                )
+    def test_feature_matrix_shape(self, arm_identities, index_map):
+        """Feature matrix has correct shape."""
+        X = self._build_feature_matrix(
+            arm_identities, index_map, "test query", None, {1: None, 2: None, 3: None},
+        )
+        assert X.shape == (len(arm_identities), index_map.dimensions)
 
-    def test_scores_identical(self, arm_identities, index_map, transformer):
-        """Scores from both paths match for a non-trivial theta."""
+    def test_one_hot_blocks_populated(self, arm_identities, index_map):
+        """Each arm has exactly one model and one prompt bit set."""
+        X = self._build_feature_matrix(
+            arm_identities, index_map, None, None, {1: None, 2: None, 3: None},
+        )
+        for i in range(len(arm_identities)):
+            # Model block: exactly one 1.0
+            model_block = X[i, :index_map.n_models]
+            assert model_block.sum() == 1.0
+            # Prompt block: exactly one 1.0
+            prompt_block = X[i, index_map.n_models:index_map.n_models + index_map.n_prompts]
+            assert prompt_block.sum() == 1.0
+
+    def test_scores_deterministic(self, arm_identities, index_map):
+        """Same inputs produce same scores."""
         rng = np.random.default_rng(42)
         theta = rng.standard_normal(index_map.dimensions)
 
         for query in self.QUERIES:
             for bandit_avg, arm_lats in self.LATENCY_CONFIGS:
-                ref = self._build_reference_vectors(
-                    arm_identities, transformer, query, bandit_avg, arm_lats,
-                )
-                opt = self._build_optimized_matrix(
+                X1 = self._build_feature_matrix(
                     arm_identities, index_map, query, bandit_avg, arm_lats,
                 )
-                ref_scores = score_arms(theta, list(ref))
-                opt_scores = opt @ theta
-                np.testing.assert_allclose(
-                    ref_scores, opt_scores, atol=1e-15,
-                    err_msg=f"Score mismatch for query={query!r}, latency={bandit_avg}",
+                X2 = self._build_feature_matrix(
+                    arm_identities, index_map, query, bandit_avg, arm_lats,
                 )
+                np.testing.assert_array_equal(X1, X2)

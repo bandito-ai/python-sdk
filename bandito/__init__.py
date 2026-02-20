@@ -67,7 +67,7 @@ def update(
     pull_result: PullResult,
     *,
     query_text: str | None = None,
-    response_text: str | dict | None = None,
+    response_text: str | dict | None = None,  # TODO: rename to `model_response` — not always text
     reward: float | None = None,
     cost: float | None = None,
     latency: float | None = None,

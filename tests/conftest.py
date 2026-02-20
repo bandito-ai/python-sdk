@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from bandito.engine import ArmIdentity, ArmIndexMap, FeatureTransformer
+from bandito.engine import ArmIdentity, ArmIndexMap
 from bandito.models import Arm
 
 
@@ -36,11 +36,6 @@ def arms():
 @pytest.fixture
 def index_map(arm_identities):
     return ArmIndexMap.from_arms(arm_identities)
-
-
-@pytest.fixture
-def transformer(index_map):
-    return FeatureTransformer(index_map)
 
 
 @pytest.fixture

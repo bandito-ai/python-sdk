@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from bandito.engine import ArmIdentity, ArmIndexMap, FeatureTransformer
+from bandito.engine import ArmIdentity, ArmIndexMap
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,6 @@ class _BanditCache:
     arms: list[Arm]
     arm_identities: list[ArmIdentity]
     index_map: ArmIndexMap
-    transformer: FeatureTransformer
     avg_latency_last_n: float | None
     arm_avg_latencies: dict[int, float | None]
     budget: float | None = None

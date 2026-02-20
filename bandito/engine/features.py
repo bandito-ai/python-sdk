@@ -30,12 +30,8 @@ Extension guide:
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
-import numpy as np
-
-from .constants import DEFAULT_RELATIVE_LATENCY, MIN_QUERY_LENGTH
 
 
 @dataclass(frozen=True)
@@ -152,112 +148,3 @@ class ArmIndexMap:
         )
 
 
-class FeatureTransformer:
-    """Transforms arm identity + context into a feature vector.
-
-    Constructed once with an ArmIndexMap, then called per-arm per-decision.
-
-    Feature vector structure (for M models, P prompts):
-        Indices [0, M):         model one-hot
-        Indices [M, M+P):       prompt one-hot
-        Indices [M+P, 2M+P):   log(query_length) * model one-hot
-        Indices [2M+P, 3M+P):  relative_latency * model one-hot
-
-    Args:
-        index_map: ArmIndexMap built from the bandit's arms.
-    """
-
-    def __init__(self, index_map: ArmIndexMap) -> None:
-        self._map = index_map
-
-    @property
-    def dimensions(self) -> int:
-        return self._map.dimensions
-
-    def transform(
-        self,
-        arm: ArmIdentity,
-        query_length: int | None = None,
-        relative_latency: float | None = None,
-    ) -> np.ndarray:
-        """Build feature vector for one arm given context.
-
-        Args:
-            arm: The arm to build features for.
-            query_length: Character count of the user query.
-                None or < 1 defaults to MIN_QUERY_LENGTH (log(1) = 0, neutral).
-            relative_latency: arm.avg_latency / bandit.avg_latency.
-                None defaults to DEFAULT_RELATIVE_LATENCY (1.0, neutral).
-
-        Returns:
-            numpy array of shape (dimensions,) with dtype float64.
-
-        Raises:
-            KeyError: If arm's model or prompt is not in the index map.
-
-        Example:
-            >>> tf = FeatureTransformer(index_map)
-            >>> x = tf.transform(arm, query_length=500, relative_latency=0.8)
-            >>> x.shape
-            (11,)
-        """
-        m = self._map
-        x = np.zeros(m.dimensions, dtype=np.float64)
-
-        model_key = (arm.model_name, arm.model_provider)
-        model_idx = m.model_to_index[model_key]
-        prompt_idx = m.prompt_to_index[arm.system_prompt]
-
-        # Block 1: model one-hot [0, M)
-        x[model_idx] = 1.0
-
-        # Block 2: prompt one-hot [M, M+P)
-        x[m.n_models + prompt_idx] = 1.0
-
-        # Context values with cold-start defaults
-        ql = max(query_length or MIN_QUERY_LENGTH, MIN_QUERY_LENGTH)
-        log_ql = math.log(ql)
-
-        rl = relative_latency if relative_latency is not None else DEFAULT_RELATIVE_LATENCY
-
-        # Block 3: log(query_length) * model [M+P, 2M+P)
-        x[m.n_models + m.n_prompts + model_idx] = log_ql
-
-        # Block 4: relative_latency * model [2M+P, 3M+P)
-        x[2 * m.n_models + m.n_prompts + model_idx] = rl
-
-        return x
-
-    def get_feature_names(self) -> list[str]:
-        """Human-readable names for each feature dimension.
-
-        Useful for diagnostics (mapping theta weights to interpretable names).
-
-        Returns:
-            List of strings with len == dimensions.
-        """
-        m = self._map
-        names: list[str] = []
-
-        # Sort by index to ensure correct ordering
-        models_sorted = sorted(m.model_to_index.items(), key=lambda kv: kv[1])
-        prompts_sorted = sorted(m.prompt_to_index.items(), key=lambda kv: kv[1])
-
-        # Block 1: model one-hot
-        for (model_name, provider), _ in models_sorted:
-            names.append(f"model:{provider}/{model_name}")
-
-        # Block 2: prompt one-hot
-        for prompt, _ in prompts_sorted:
-            label = prompt[:40] + "..." if len(prompt) > 40 else prompt
-            names.append(f"prompt:{label}")
-
-        # Block 3: log(query_len) * model
-        for (model_name, provider), _ in models_sorted:
-            names.append(f"log_query_len*{provider}/{model_name}")
-
-        # Block 4: relative_latency * model
-        for (model_name, provider), _ in models_sorted:
-            names.append(f"rel_latency*{provider}/{model_name}")
-
-        return names

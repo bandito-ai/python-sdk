@@ -25,9 +25,7 @@ from bandito.engine import (
     OPTIMIZATION_BETAS,
     ArmIdentity,
     ArmIndexMap,
-    FeatureTransformer,
     sample_thompson,
-    score_arms,
 )
 from bandito.config import DEFAULT_BASE_URL
 from bandito.http import BanditoHTTP
@@ -243,7 +241,7 @@ class BanditoClient:
         pull_result: PullResult,
         *,
         query_text: str | None = None,
-        response_text: str | dict | None = None,
+        response_text: str | dict | None = None,  # TODO: rename to `model_response` — not always text
         reward: float | None = None,
         cost: float | None = None,
         latency: float | None = None,
@@ -398,7 +396,6 @@ class BanditoClient:
                 continue
 
             index_map = ArmIndexMap.from_arms(identities)
-            transformer = FeatureTransformer(index_map)
 
             theta_raw = b["theta"]
             chol_raw = b["cholesky"]
@@ -424,7 +421,6 @@ class BanditoClient:
                 arms=arms,
                 arm_identities=identities,
                 index_map=index_map,
-                transformer=transformer,
                 avg_latency_last_n=b.get("avg_latency_last_n"),
                 arm_avg_latencies=arm_latencies,
                 budget=b.get("budget"),
