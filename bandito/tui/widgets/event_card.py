@@ -82,8 +82,11 @@ class EventCard(ListItem):
         indicator = " ►" if self.highlighted else "  "
         label = f"{model}/{provider}" if provider else model
 
+        imm_reward = self.event_data.get("immediate_reward")
+        reward_tag = f" [dim]r:{imm_reward:.2f}[/]" if imm_reward is not None else ""
+
         self.query_one(".ec-model", Static).update(
-            f"{prefix}{indicator} [bold]{label}[/]"
+            f"{prefix}{indicator} [bold]{label}[/]{reward_tag}"
         )
 
         query = self.event_data.get("query_text", "")

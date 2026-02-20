@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Markdown, Static
 
 from bandito.tui.utils import format_response_text
 
@@ -50,6 +50,10 @@ class EventDetailScreen(ModalScreen[float | None]):
         margin: 0 0 1 0;
     }
 
+    .detail-markdown {
+        margin: 0 0 1 0;
+    }
+
     #detail-footer {
         height: auto;
         padding: 1 0 0 0;
@@ -84,7 +88,7 @@ class EventDetailScreen(ModalScreen[float | None]):
         imm_reward = ev.get("immediate_reward")
         reward_str = f"{imm_reward:.3f}" if imm_reward is not None else "—"
 
-        query_text = str(ev.get("query_text") or "[no query text]")
+        query_text = str(ev.get("query_text") or "*no query text*")
         response_display = format_response_text(ev.get("response_text"))
         prompt = ev.get("system_prompt")
 
@@ -99,14 +103,14 @@ class EventDetailScreen(ModalScreen[float | None]):
             )
 
             with VerticalScroll(id="detail-content"):
-                yield Static("QUERY", classes="detail-section-header")
-                yield Static(query_text, classes="detail-text")
+                yield Static("USER INPUT", classes="detail-section-header")
+                yield Markdown(query_text, classes="detail-markdown")
                 yield Static("RESPONSE", classes="detail-section-header")
-                yield Static(response_display, classes="detail-text")
+                yield Markdown(response_display, classes="detail-markdown")
 
                 if prompt:
                     yield Static("SYSTEM PROMPT", classes="detail-section-header")
-                    yield Static(str(prompt), classes="detail-text")
+                    yield Markdown(str(prompt), classes="detail-markdown")
 
             yield Static(
                 "[bold green]y[/] Good  [bold red]n[/] Bad  "

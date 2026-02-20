@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import ListView, Static
+from textual.widgets import ListView, Markdown, Static
 from textual import work
 from textual.worker import Worker, WorkerState
 
@@ -65,6 +65,10 @@ class DashboardScreen(Screen):
     }
 
     .detail-text {
+        margin: 0 0 1 0;
+    }
+
+    .detail-markdown {
         margin: 0 0 1 0;
     }
 
@@ -144,12 +148,12 @@ class DashboardScreen(Screen):
                 yield ListView(id="grading-list")
             with VerticalScroll(id="detail-pane"):
                 yield Static("", id="detail-meta")
-                yield Static("QUERY", classes="detail-section-header")
-                yield Static("", id="detail-query-text", classes="detail-text")
+                yield Static("USER INPUT", classes="detail-section-header")
+                yield Markdown("", id="detail-query-text", classes="detail-markdown")
                 yield Static("RESPONSE", classes="detail-section-header")
-                yield Static("", id="detail-response-text", classes="detail-text")
+                yield Markdown("", id="detail-response-text", classes="detail-markdown")
                 yield Static("SYSTEM PROMPT", classes="detail-section-header", id="detail-prompt-header")
-                yield Static("", id="detail-prompt-text", classes="detail-text")
+                yield Markdown("", id="detail-prompt-text", classes="detail-markdown")
                 yield Static(
                     "[bold green]y[/] Good  [bold red]n[/] Bad  "
                     "[bold]s[/] Skip  [bold]Space[/] Select",
@@ -173,8 +177,8 @@ class DashboardScreen(Screen):
 
     def on_mount(self) -> None:
         # Hide prompt section initially
-        self.query_one("#detail-prompt-header").styles.display = "none"
-        self.query_one("#detail-prompt-text").styles.display = "none"
+        self.query_one("#detail-prompt-header", Static).styles.display = "none"
+        self.query_one("#detail-prompt-text", Markdown).styles.display = "none"
         self._refresh_grading_queue()
         # Auto-focus the event list so keyboard navigation works immediately
         self.query_one("#grading-list", ListView).focus()
@@ -348,10 +352,10 @@ class DashboardScreen(Screen):
             f"[dim]{uuid[:8]}[/]"
         )
 
-        self.query_one("#detail-query-text", Static).update(
-            str(event_data.get("query_text") or "[no query text]")
+        self.query_one("#detail-query-text", Markdown).update(
+            str(event_data.get("query_text") or "*no query text*")
         )
-        self.query_one("#detail-response-text", Static).update(
+        self.query_one("#detail-response-text", Markdown).update(
             format_response_text(event_data.get("response_text"))
         )
 
@@ -359,7 +363,7 @@ class DashboardScreen(Screen):
         if prompt:
             self.query_one("#detail-prompt-header").styles.display = "block"
             self.query_one("#detail-prompt-text").styles.display = "block"
-            self.query_one("#detail-prompt-text", Static).update(str(prompt))
+            self.query_one("#detail-prompt-text", Markdown).update(str(prompt))
         else:
             self.query_one("#detail-prompt-header").styles.display = "none"
             self.query_one("#detail-prompt-text").styles.display = "none"

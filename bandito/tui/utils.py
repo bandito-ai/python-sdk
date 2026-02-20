@@ -9,7 +9,7 @@ from typing import Any
 
 def format_response_text(
     value: Any,
-    fallback: str = "[no response text]",
+    fallback: str = "no response text",
     *,
     max_length: int | None = None,
 ) -> str:
@@ -26,10 +26,10 @@ def format_response_text(
         max_length: If set, truncate the result with "..." suffix.
 
     Returns:
-        Display-ready string.
+        Display-ready string (Markdown-compatible).
     """
     if value is None:
-        display = fallback
+        display = f"*{fallback}*" if fallback else ""
     elif isinstance(value, dict):
         if list(value.keys()) == ["response"] and isinstance(value["response"], str):
             display = value["response"]
