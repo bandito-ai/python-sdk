@@ -175,6 +175,8 @@ class DashboardScreen(Screen):
         self.query_one("#detail-prompt-header").styles.display = "none"
         self.query_one("#detail-prompt-text").styles.display = "none"
         self._refresh_grading_queue()
+        # Auto-focus the event list so keyboard navigation works immediately
+        self.query_one("#grading-list", ListView).focus()
 
     # ── Data loading (cloud) ───────────────────────────────────────
 

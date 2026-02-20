@@ -44,6 +44,8 @@ class BanditSelectScreen(Screen):
 
     BINDINGS = [
         Binding("r", "refresh", "Refresh", show=True),
+        Binding("question_mark", "show_help", "Help", show=True, key_display="?"),
+        Binding("q", "quit", "Quit", show=True),
         Binding("escape", "quit", "Quit", show=False),
     ]
 
@@ -115,6 +117,10 @@ class BanditSelectScreen(Screen):
     def action_refresh(self) -> None:
         self.query_one("#bandit-status").update("Loading...")
         self._load_bandits()
+
+    def action_show_help(self) -> None:
+        from bandito.tui.screens.help import HelpScreen
+        self.app.push_screen(HelpScreen())
 
     def action_quit(self) -> None:
         self.app.exit()

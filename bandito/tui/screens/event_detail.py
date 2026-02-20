@@ -13,6 +13,31 @@ from textual.widgets import Static
 from bandito.tui.utils import format_response_text
 
 
+class CopyableText(Static):
+    """A Static widget that copies its plain text content to clipboard on click."""
+
+    CSS = """
+    CopyableText {
+        padding: 0 1;
+    }
+
+    CopyableText:hover {
+        background: $accent 20%;
+    }
+    """
+
+    def __init__(self, text: str, **kwargs: Any) -> None:
+        super().__init__(text, **kwargs)
+        self._raw_text = text
+
+    def on_click(self) -> None:
+        try:
+            self.app.copy_to_clipboard(self._raw_text)
+            self.app.notify("Copied to clipboard", severity="information")
+        except Exception:
+            self.app.notify("Copy to clipboard failed", severity="warning")
+
+
 class EventDetailScreen(ModalScreen[float | None]):
     """Modal showing full event payload. Returns grade or None."""
 
@@ -50,6 +75,11 @@ class EventDetailScreen(ModalScreen[float | None]):
         margin: 0 0 1 0;
     }
 
+    .copy-hint {
+        color: $text-muted;
+        text-style: italic;
+    }
+
     #detail-footer {
         height: auto;
         padding: 1 0 0 0;
@@ -83,6 +113,10 @@ class EventDetailScreen(ModalScreen[float | None]):
         imm_reward = ev.get("immediate_reward")
         reward_str = f"{imm_reward:.3f}" if imm_reward is not None else "—"
 
+        query_text = ev.get("query_text", "[no query text]")
+        response_text = ev.get("response_text")
+        prompt = ev.get("system_prompt")
+
         with Vertical(id="detail-dialog"):
             yield Static(
                 f"[bold]{model}[/] / {provider}  "
@@ -94,24 +128,21 @@ class EventDetailScreen(ModalScreen[float | None]):
             )
 
             with VerticalScroll(id="detail-content"):
-                yield Static("QUERY", classes="detail-section-header")
-                yield Static(
-                    ev.get("query_text", "[no query text]"),
-                    classes="detail-text",
-                )
-                yield Static("RESPONSE", classes="detail-section-header")
-                yield Static(
-                    format_response_text(ev.get("response_text")),
+                yield Static("QUERY [dim italic](click to copy)[/]", classes="detail-section-header")
+                yield CopyableText(query_text, classes="detail-text")
+                yield Static("RESPONSE [dim italic](click to copy)[/]", classes="detail-section-header")
+                yield CopyableText(
+                    response_text if response_text else "[no response text]",
                     classes="detail-text",
                 )
 
-                prompt = ev.get("system_prompt")
                 if prompt:
-                    yield Static("SYSTEM PROMPT", classes="detail-section-header")
-                    yield Static(prompt, classes="detail-text")
+                    yield Static("SYSTEM PROMPT [dim italic](click to copy)[/]", classes="detail-section-header")
+                    yield CopyableText(prompt, classes="detail-text")
 
             yield Static(
-                "[bold green]y[/] Good  [bold red]n[/] Bad  [dim]Esc[/] Close",
+                "[bold green]y[/] Good  [bold red]n[/] Bad  [dim]Esc[/] Close  "
+                "[dim]Click text to copy[/]",
                 id="detail-footer",
             )
 
