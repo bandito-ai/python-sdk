@@ -30,10 +30,8 @@ HELP_TEXT = """\
 
 [bold]View[/bold]
   [bold cyan]t[/]         Toggle sidebar
-  [bold cyan]c[/]         Copy all (query + response + prompt)
+  [bold cyan]d[/]         Download event as JSON
   [bold cyan]?[/]         Toggle this help
-
-[dim]Click any text section to copy it individually[/]
 """
 
 
