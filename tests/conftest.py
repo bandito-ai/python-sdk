@@ -64,7 +64,7 @@ def make_sync_response(bandits=None, *, budget=None, total_cost=None):
             "cholesky": np.eye(d).tolist(),
             "dimensions": d,
             "arms": [
-                {**a, "avg_latency_last_n": None}
+                {**a, "is_active": True, "avg_latency_last_n": None}
                 for a in ARM_DATA
             ],
         }]

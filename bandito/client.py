@@ -224,7 +224,7 @@ class BanditoClient:
                 # Block 4: relative_latency * model
                 arm_latency = cache.arm_avg_latencies.get(identity.arm_id)
                 bandit_latency = cache.avg_latency_last_n
-                if arm_latency and bandit_latency and bandit_latency > 0:
+                if arm_latency is not None and bandit_latency is not None and bandit_latency > 0:
                     rl = arm_latency / bandit_latency
                 else:
                     rl = DEFAULT_RELATIVE_LATENCY
@@ -233,29 +233,38 @@ class BanditoClient:
             # Score: X @ theta_tilde (no array copy needed)
             scores_array = X @ theta_tilde
 
+            # Mask inactive arms (feature matrix includes all arms for
+            # dimension consistency; only active arms are selectable)
+            for i, identity in enumerate(cache.arm_identities):
+                if identity.arm_id not in cache.active_arm_ids:
+                    scores_array[i] = -np.inf
+
             # Circuit breaker: mask excluded arms
             if exclude:
                 exclude_set = set(exclude)
                 for i, identity in enumerate(cache.arm_identities):
                     if identity.arm_id in exclude_set:
                         scores_array[i] = -np.inf
-                if np.all(scores_array == -np.inf):
-                    raise ValueError(
-                        f"All arms excluded for bandit '{bandit_name}'. "
-                        f"exclude={exclude}, available arm_ids: "
-                        f"{[a.arm_id for a in cache.arms]}"
-                    )
 
-            # Map scores to arm_id (skip excluded arms marked as -inf)
+            if np.all(scores_array == -np.inf):
+                raise ValueError(
+                    f"All arms excluded for bandit '{bandit_name}'. "
+                    f"exclude={exclude}, available arm_ids: "
+                    f"{[a.arm_id for a in cache.arms]}"
+                )
+
+            # Map scores to arm_id (skip inactive/excluded arms marked as -inf)
             scores = {
                 cache.arm_identities[i].arm_id: float(scores_array[i])
                 for i in range(len(cache.arm_identities))
                 if scores_array[i] != -np.inf
             }
 
-            # Winner = highest score
+            # Winner = highest score among active arms
             winner_idx = int(np.argmax(scores_array))
-            winner_arm = cache.arms[winner_idx]
+            winner_identity = cache.arm_identities[winner_idx]
+            # Look up the active Arm object by arm_id
+            winner_arm = next(a for a in cache.arms if a.arm_id == winner_identity.arm_id)
 
         return PullResult(
             arm=winner_arm,
@@ -435,18 +444,16 @@ class BanditoClient:
         self._bandits.clear()
 
         for b in data.get("bandits", []):
-            arms: list[Arm] = []
+            active_arms: list[Arm] = []
             identities: list[ArmIdentity] = []
             arm_latencies: dict[int, float | None] = {}
+            active_arm_ids: set[int] = set()
 
+            # Build identities from ALL arms (active + inactive) so
+            # dimensions match the backend's theta/chol arrays.
+            # Only active arms are exposed to users via cache.arms.
             for a in b.get("arms", []):
-                arms.append(Arm(
-                    arm_id=a["arm_id"],
-                    model_name=a["model_name"],
-                    model_provider=a["model_provider"],
-                    system_prompt=a["system_prompt"],
-                    is_prompt_templated=a["is_prompt_templated"],
-                ))
+                is_active = a.get("is_active", True)
                 identities.append(ArmIdentity(
                     arm_id=a["arm_id"],
                     model_name=a["model_name"],
@@ -454,6 +461,15 @@ class BanditoClient:
                     system_prompt=a["system_prompt"],
                 ))
                 arm_latencies[a["arm_id"]] = a.get("avg_latency_last_n")
+                if is_active:
+                    active_arms.append(Arm(
+                        arm_id=a["arm_id"],
+                        model_name=a["model_name"],
+                        model_provider=a["model_provider"],
+                        system_prompt=a["system_prompt"],
+                        is_prompt_templated=a["is_prompt_templated"],
+                    ))
+                    active_arm_ids.add(a["arm_id"])
 
             if not identities:
                 continue
@@ -464,6 +480,8 @@ class BanditoClient:
             chol_raw = b["cholesky"]
 
             # Pre-allocate feature matrix with static one-hot blocks filled.
+            # Rows for ALL arms (active + inactive) — inactive rows are scored
+            # but masked to -inf at pull() time.
             # Context columns (log_query_len, rel_latency) are overwritten per pull().
             dims = index_map.dimensions
             n_arms = len(identities)
@@ -481,11 +499,12 @@ class BanditoClient:
                 chol=np.array(chol_raw, dtype=np.float64),
                 dimensions=b["dimensions"],
                 optimization_mode=b.get("optimization_mode", "base"),
-                arms=arms,
+                arms=active_arms,
                 arm_identities=identities,
                 index_map=index_map,
                 avg_latency_last_n=b.get("avg_latency_last_n"),
                 arm_avg_latencies=arm_latencies,
+                active_arm_ids=active_arm_ids,
                 budget=b.get("budget"),
                 total_cost=b.get("total_cost"),
                 feature_matrix=feature_matrix,

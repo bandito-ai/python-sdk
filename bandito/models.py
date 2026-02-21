@@ -68,6 +68,7 @@ class _BanditCache:
     index_map: ArmIndexMap
     avg_latency_last_n: float | None
     arm_avg_latencies: dict[int, float | None]
+    active_arm_ids: set[int] = field(default_factory=set)
     budget: float | None = None
     total_cost: float | None = None
     # Pre-allocated feature matrix (n_arms x dims). Static one-hot blocks are

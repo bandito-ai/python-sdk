@@ -60,7 +60,7 @@ class TestSyncContract:
             "theta": theta,
             "cholesky": np.eye(d).tolist(),
             "dimensions": d,
-            "arms": [{**a, "avg_latency_last_n": None} for a in ARM_DATA],
+            "arms": [{**a, "is_active": True, "avg_latency_last_n": None} for a in ARM_DATA],
         }])
 
         client = _make_offline_client()
@@ -125,7 +125,7 @@ class TestSyncContract:
             "theta": [0.0] * d,
             "cholesky": np.eye(d).tolist(),
             "dimensions": d,
-            "arms": [{**a, "avg_latency_last_n": None} for a in ARM_DATA],
+            "arms": [{**a, "is_active": True, "avg_latency_last_n": None} for a in ARM_DATA],
         }])
 
         client = _make_offline_client()
@@ -224,7 +224,7 @@ class TestSyncContract:
         assert result.arm is not None
 
     def test_feature_matrix_shape_matches_dims(self):
-        """Pre-allocated feature matrix has shape (n_arms, dims)."""
+        """Pre-allocated feature matrix has shape (n_all_arms, dims)."""
         d = EXPECTED_DIMS
         sync_data = make_sync_response()
 
@@ -233,3 +233,52 @@ class TestSyncContract:
 
         cache = client._bandits["my-chatbot"]
         assert cache.feature_matrix.shape == (len(ARM_DATA), d)
+
+    def test_inactive_arm_dimensions_match(self):
+        """When an arm is deactivated, dimensions still match theta/chol.
+
+        Backend computes dimensions from ALL arms (active + inactive).
+        Sync sends all arms with is_active flag. SDK must use all arms
+        for dimension computation so feature matrix @ theta doesn't fail.
+        """
+        d = EXPECTED_DIMS  # 8 = 3*2 + 2 (2 models, 2 prompts)
+        # Deactivate arm 2 (claude-sonnet/Anthropic) — still has 2 models/2 prompts
+        arms_with_inactive = [
+            {**ARM_DATA[0], "is_active": True, "avg_latency_last_n": None},
+            {**ARM_DATA[1], "is_active": False, "avg_latency_last_n": None},
+            {**ARM_DATA[2], "is_active": True, "avg_latency_last_n": None},
+        ]
+        sync_data = make_sync_response([{
+            "bandit_id": 1, "name": "inactive-bot", "type": "online",
+            "cost_importance": 0, "latency_importance": 0,
+            "optimization_mode": "base", "total_pull_count": 100,
+            "avg_latency_last_n": None,
+            "theta": [0.0] * d,
+            "cholesky": np.eye(d).tolist(),
+            "dimensions": d,
+            "arms": arms_with_inactive,
+        }])
+
+        client = _make_offline_client()
+        client._rng = np.random.default_rng(42)
+        client._apply_sync(sync_data)
+
+        cache = client._bandits["inactive-bot"]
+
+        # Dimensions must match backend's theta length
+        assert cache.index_map.dimensions == d
+        assert cache.feature_matrix.shape == (3, d)  # all 3 arms in matrix
+        assert len(cache.theta) == d
+
+        # Only 2 active arms exposed to user
+        assert len(cache.arms) == 2
+        active_ids = {a.arm_id for a in cache.arms}
+        assert active_ids == {1, 3}
+
+        # pull() should work and never select the inactive arm
+        selected_ids = set()
+        for _ in range(100):
+            result = client.pull("inactive-bot")
+            selected_ids.add(result.arm.arm_id)
+        assert 2 not in selected_ids, "Inactive arm should never be selected"
+        assert selected_ids.issubset({1, 3})
