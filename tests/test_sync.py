@@ -52,7 +52,7 @@ class TestConnect:
                 "arms": [{**a, "avg_latency_last_n": None} for a in ARM_DATA],
             },
             {
-                "bandit_id": 2, "name": "chatbot-b", "type": "experiment",
+                "bandit_id": 2, "name": "chatbot-b", "type": "offline",
                 "cost_importance": 1, "latency_importance": 1,
                 "optimization_mode": "explore", "total_pull_count": 10,
                 "avg_latency_last_n": 500.0,

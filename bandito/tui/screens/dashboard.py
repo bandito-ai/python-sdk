@@ -13,7 +13,7 @@ from textual import work
 from textual.worker import Worker, WorkerState
 
 from bandito.tui.widgets.arm_table import ArmTable
-from bandito.tui.utils import format_response_text
+from bandito.tui.utils import format_response
 from bandito.tui.widgets.event_card import EventCard
 from bandito.tui.widgets.stats_panel import StatsPanel
 
@@ -257,11 +257,11 @@ class DashboardScreen(Screen):
         """Cloud fetch + local text merge, runs in worker thread."""
         has_human = None if self._show_graded else False
         data = self.app.api.list_events(
-            self._bandit_id, has_human_reward=has_human, limit=50,
+            self._bandit_id, has_grade=has_human, limit=50,
         )
         events = data.get("items", [])
 
-        # Merge local text (query_text, response_text) from SQLite
+        # Merge local text (query_text, response) from SQLite
         store = self.app.store
         if store is not None and events:
             uuids = [e.get("local_event_uuid", "") for e in events]
@@ -273,8 +273,8 @@ class DashboardScreen(Screen):
                     # Local text wins when present (cloud may also have it)
                     if text.get("query_text") is not None:
                         ev["query_text"] = text["query_text"]
-                    if text.get("response_text") is not None:
-                        ev["response_text"] = text["response_text"]
+                    if text.get("response") is not None:
+                        ev["response"] = text["response"]
 
         return events
 
@@ -297,7 +297,7 @@ class DashboardScreen(Screen):
             for ev in self._events:
                 uuid = ev.get("local_event_uuid", "")
                 card = EventCard(ev)
-                if ev.get("human_reward") is not None:
+                if ev.get("grade") is not None:
                     card._graded = True
                 if uuid in self._skipped_uuids:
                     card._skipped = True
@@ -356,7 +356,7 @@ class DashboardScreen(Screen):
             str(event_data.get("query_text") or "*no query text*")
         )
         self.query_one("#detail-response-text", Markdown).update(
-            format_response_text(event_data.get("response_text"))
+            format_response(event_data.get("response"))
         )
 
         prompt = event_data.get("system_prompt")
@@ -426,7 +426,7 @@ class DashboardScreen(Screen):
         for ev in self._events:
             uuid = ev.get("local_event_uuid", "")
             card = EventCard(ev)
-            if ev.get("human_reward") is not None:
+            if ev.get("grade") is not None:
                 card._graded = True
             if uuid in self._skipped_uuids:
                 card._skipped = True

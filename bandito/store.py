@@ -120,10 +120,10 @@ class EventStore:
             return [json.loads(row[0]) for row in cursor.fetchall()]
 
     def get_text(self, uuids: list[str]) -> dict[str, dict[str, str | None]]:
-        """Look up query_text and response_text for a batch of UUIDs.
+        """Look up query_text and response for a batch of UUIDs.
 
         Returns:
-            Mapping of uuid → {"query_text": ..., "response_text": ...}
+            Mapping of uuid → {"query_text": ..., "response": ...}
             Only includes UUIDs found in the store.
         """
         if not uuids:
@@ -140,7 +140,7 @@ class EventStore:
                 payload = json.loads(row[1])
                 result[row[0]] = {
                     "query_text": payload.get("query_text"),
-                    "response_text": payload.get("response_text"),
+                    "response": payload.get("response"),
                 }
             return result
 

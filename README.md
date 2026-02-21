@@ -56,7 +56,7 @@ response = openai.chat.completions.create(
 bandito.update(
     result,
     query_text=user_message,
-    response_text=response.choices[0].message.content,
+    response=response.choices[0].message.content,
     reward=0.85,
     cost=0.003,
     latency=elapsed_ms,
@@ -139,7 +139,7 @@ Local Thompson Sampling decision. Pure math, <1ms, no network call.
 Returns a `PullResult` with:
 - `result.model` — model name (e.g. `"gpt-4o"`)
 - `result.prompt` — system prompt text
-- `result.event_id` — UUID linking this pull to its update/reward
+- `result.event_id` — UUID linking this pull to its update/grade
 - `result.arm` — full `Arm` object (model_name, model_provider, system_prompt, is_prompt_templated)
 - `result.scores` — `dict[int, float]` of arm_id to score (for debugging)
 
@@ -151,7 +151,7 @@ Report event data. Writes to local SQLite first (crash-safe), then submits a non
 |-----------|------|-------------|
 | `pull_result` | `PullResult` | Result from `pull()` |
 | `query_text` | `str` | The user's query |
-| `response_text` | `str \| dict` | The LLM's response. Strings are auto-wrapped as `{"response": "..."}` |
+| `response` | `str \| dict` | The LLM's response. Strings are auto-wrapped as `{"response": "..."}` |
 | `reward` | `float` | Immediate reward (0.0-1.0) |
 | `cost` | `float` | Cost in dollars |
 | `latency` | `float` | Latency in milliseconds |
@@ -159,15 +159,14 @@ Report event data. Writes to local SQLite first (crash-safe), then submits a non
 | `output_tokens` | `int` | Output token count |
 | `segment` | `dict[str, str]` | Key-value segment tags |
 
-### `reward(event_id, reward, *, is_human=True)`
+### `grade(event_id, grade)`
 
-Send a delayed reward for an existing event. Synchronous HTTP call — blocks until confirmed.
+Send a human grade for an existing event. Synchronous HTTP call — blocks until confirmed.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `event_id` | `str` | | The `event_id` from `PullResult` |
-| `reward` | `float` | | Reward value (0.0-1.0) |
-| `is_human` | `bool` | `True` | Whether this is a human-graded reward |
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `event_id` | `str` | The `event_id` from `PullResult` |
+| `grade` | `float` | Grade value (0.0-1.0) |
 
 ### `sync()`
 

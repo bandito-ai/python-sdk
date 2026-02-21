@@ -88,6 +88,33 @@ class StatsPanel(Static):
         else:
             self._update_horizontal(data)
 
+    @staticmethod
+    def _budget_color(ratio: float) -> str:
+        """Return a Rich color tag based on budget usage ratio."""
+        if ratio > 1.0:
+            return "bold red"
+        elif ratio > 0.9:
+            return "red"
+        elif ratio > 0.7:
+            return "yellow"
+        return "green"
+
+    @staticmethod
+    def _format_budget(cost: float | None, budget: float | None) -> str:
+        """Format the budget value string (no label prefix).
+
+        When both cost and budget exist: ``$10.00 (25% used)`` with color.
+        When only budget exists: ``$10.00``.
+        Otherwise: ``—``.
+        """
+        if cost is not None and budget is not None and budget > 0:
+            ratio = cost / budget
+            color = StatsPanel._budget_color(ratio)
+            return f"[{color}]${budget:.2f} ({ratio:.0%} used)[/]"
+        if budget is not None:
+            return f"${budget:.2f}"
+        return "—"
+
     def _update_horizontal(self, data: dict[str, Any]) -> None:
         self.query_one("#stat-events", StatCard).set_value(
             f"{data.get('total_events', 0):,}"
@@ -95,17 +122,17 @@ class StatsPanel(Static):
         self.query_one("#stat-rewarded", StatCard).set_value(
             f"{data.get('total_rewarded', 0):,}"
         )
-        avg = data.get("avg_computed_reward")
+        avg = data.get("avg_reward")
         self.query_one("#stat-reward", StatCard).set_value(
             f"{avg:.3f}" if avg is not None else "—"
         )
         cost = data.get("total_cost")
+        budget = data.get("budget")
         self.query_one("#stat-cost", StatCard).set_value(
             f"${cost:.2f}" if cost is not None else "—"
         )
-        budget = data.get("budget")
         self.query_one("#stat-budget", StatCard).set_value(
-            f"${budget:.2f}" if budget is not None else "—"
+            self._format_budget(cost, budget)
         )
 
     def _update_vertical(self, data: dict[str, Any]) -> None:
@@ -117,15 +144,15 @@ class StatsPanel(Static):
         self.query_one("#vstat-rewarded", Static).update(
             f"[dim]Rewarded:[/] {rewarded:,}"
         )
-        avg = data.get("avg_computed_reward")
+        avg = data.get("avg_reward")
         self.query_one("#vstat-reward", Static).update(
             f"[dim]Avg Reward:[/] {avg:.3f}" if avg is not None else "[dim]Avg Reward:[/] —"
         )
         cost = data.get("total_cost")
+        budget = data.get("budget")
         self.query_one("#vstat-cost", Static).update(
             f"[dim]Cost:[/] ${cost:.2f}" if cost is not None else "[dim]Cost:[/] —"
         )
-        budget = data.get("budget")
         self.query_one("#vstat-budget", Static).update(
-            f"[dim]Budget:[/] ${budget:.2f}" if budget is not None else "[dim]Budget:[/] —"
+            f"[dim]Budget:[/] {self._format_budget(cost, budget)}"
         )

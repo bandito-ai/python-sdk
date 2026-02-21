@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -56,7 +57,7 @@ class BanditoClient:
         with BanditoClient(api_key="bnd_...") as client:
             result = client.pull("my-chatbot", query=user_message)
             response = call_llm(result.model, result.prompt, user_message)
-            client.update(result, response_text=response.text)
+            client.update(result, response=response.text)
 
     Explicit connect/close:
 
@@ -137,23 +138,33 @@ class BanditoClient:
             os.makedirs(os.path.dirname(store_path), exist_ok=True)
         self._store = EventStore(store_path)
 
-        # Fetch full state from cloud
-        data = self._http.connect()
-        with self._lock:
-            self._apply_sync(data)
+        # Bootstrap: fetch state, hydrate cache, flush pending.
+        # If anything fails, clean up _http/_store so a retry of connect()
+        # doesn't orphan resources (since _connected is still False,
+        # the reconnect guard at the top of connect() won't call close()).
+        try:
+            data = self._http.connect()
+            with self._lock:
+                self._apply_sync(data)
 
-        # Reset retry state — reconnect gives previously-rejected events another chance
-        self._dead_uuids.clear()
-        self._retry_counts.clear()
+            # Reset retry state — reconnect gives previously-rejected events another chance
+            self._dead_uuids.clear()
+            self._retry_counts.clear()
 
-        # Flush any events pending from a previous crash
-        self._flush_pending()
+            # Flush any events pending from a previous crash
+            self._flush_pending()
 
-        # Create executor for non-blocking event flushes.
-        # Python's atexit automatically calls shutdown(wait=True) on live
-        # executors, so pending flushes complete before process exit.
-        self._executor = ThreadPoolExecutor(max_workers=1)
-        self._connected = True
+            # Create executor for non-blocking event flushes.
+            # Python's atexit automatically calls shutdown(wait=True) on live
+            # executors, so pending flushes complete before process exit.
+            self._executor = ThreadPoolExecutor(max_workers=1)
+            self._connected = True
+        except Exception:
+            self._http.close()
+            self._http = None
+            self._store.close()
+            self._store = None
+            raise
 
         logger.info("Connected — %d bandits", len(self._bandits))
 
@@ -162,12 +173,16 @@ class BanditoClient:
         bandit_name: str,
         *,
         query: str | None = None,
+        exclude: list[int] | None = None,
     ) -> PullResult:
         """Local Thompson Sampling decision. Pure math, <1ms, no network.
 
         Args:
             bandit_name: Name of the bandit to pull from.
             query: User query text (used for feature engineering).
+            exclude: Arm IDs to exclude from selection (circuit breaker).
+                Use ``result.arm.arm_id`` from a previous pull to skip
+                a failing arm.
 
         Returns:
             PullResult with the winning arm and event_id.
@@ -218,10 +233,24 @@ class BanditoClient:
             # Score: X @ theta_tilde (no array copy needed)
             scores_array = X @ theta_tilde
 
-            # Map scores to arm_id
+            # Circuit breaker: mask excluded arms
+            if exclude:
+                exclude_set = set(exclude)
+                for i, identity in enumerate(cache.arm_identities):
+                    if identity.arm_id in exclude_set:
+                        scores_array[i] = -np.inf
+                if np.all(scores_array == -np.inf):
+                    raise ValueError(
+                        f"All arms excluded for bandit '{bandit_name}'. "
+                        f"exclude={exclude}, available arm_ids: "
+                        f"{[a.arm_id for a in cache.arms]}"
+                    )
+
+            # Map scores to arm_id (skip excluded arms marked as -inf)
             scores = {
                 cache.arm_identities[i].arm_id: float(scores_array[i])
                 for i in range(len(cache.arm_identities))
+                if scores_array[i] != -np.inf
             }
 
             # Winner = highest score
@@ -234,6 +263,7 @@ class BanditoClient:
             bandit_id=cache.bandit_id,
             bandit_name=bandit_name,
             scores=scores,
+            _pull_time=time.perf_counter(),
         )
 
     def update(
@@ -241,13 +271,14 @@ class BanditoClient:
         pull_result: PullResult,
         *,
         query_text: str | None = None,
-        response_text: str | dict | None = None,  # TODO: rename to `model_response` — not always text
+        response: str | dict | None = None,
         reward: float | None = None,
         cost: float | None = None,
         latency: float | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         segment: dict[str, str] | None = None,
+        failed: bool = False,
     ) -> None:
         """Record an LLM call outcome. Writes to SQLite first (crash-safe),
         then submits a non-blocking flush to the background executor.
@@ -256,18 +287,18 @@ class BanditoClient:
         ``output_tokens`` are provided, the server auto-calculates cost from
         the arm's model pricing. An explicit ``cost`` always wins.
 
-        Text storage: ``query_text`` and ``response_text`` are always saved
+        Text storage: ``query_text`` and ``response`` are always saved
         to local SQLite (for TUI grading). Whether they are also sent to
         the cloud depends on the ``data_storage`` setting ("local" keeps
         them local-only; "cloud" sends them).
 
-        For delayed or human-graded rewards, use ``bandito.reward()`` instead
+        For delayed or human grades, use ``bandito.grade()`` instead
         of the ``reward`` parameter here.
 
         Args:
             pull_result: Result from pull().
             query_text: The user's query text.
-            response_text: The LLM's response text. Accepts a string or
+            response: The LLM's response text. Accepts a string or
                 dict. Strings are normalized to ``{"response": "..."}``
                 before storage.
             reward: Immediate reward (0.0-1.0).
@@ -279,8 +310,18 @@ class BanditoClient:
             output_tokens: Output token count (enables auto-cost when cost
                 is omitted).
             segment: Key-value segment tags.
+            failed: If True, marks this as a failed LLM call. Defaults
+                reward to 0.0 (explicit reward overrides) and sets
+                ``run_error: true`` on the event.
         """
         self._ensure_connected()
+
+        if failed and reward is None:
+            reward = 0.0
+
+        # Auto-calculate latency (ms) from pull() timestamp if not provided
+        if latency is None and pull_result._pull_time > 0:
+            latency = (time.perf_counter() - pull_result._pull_time) * 1000.0
 
         event: dict[str, Any] = {
             "local_event_uuid": pull_result.event_id,
@@ -291,13 +332,13 @@ class BanditoClient:
         }
         if query_text is not None:
             event["query_text"] = query_text
-        if response_text is not None:
-            if isinstance(response_text, str):
-                event["response_text"] = {"response": response_text}
+        if response is not None:
+            if isinstance(response, str):
+                event["response"] = {"response": response}
             else:
-                event["response_text"] = response_text
+                event["response"] = response
         if reward is not None:
-            event["immediate_reward"] = reward  # backend schema field name
+            event["early_reward"] = reward  # backend schema field name
         if cost is not None:
             event["cost"] = cost
         if latency is not None:
@@ -308,6 +349,8 @@ class BanditoClient:
             event["output_tokens"] = output_tokens
         if segment is not None:
             event["segment"] = segment
+        if failed:
+            event["run_error"] = True
 
         # Write to SQLite WAL first — survives crashes
         self._store.push(event)
@@ -316,31 +359,41 @@ class BanditoClient:
         if self._executor:
             self._executor.submit(self._flush_pending)
 
-    def reward(
+    def grade(
         self,
         event_id: str,
-        reward: float,
-        *,
-        is_human: bool = True,
+        grade: float,
     ) -> None:
-        """Send a delayed reward for an existing event.
+        """Send a human grade for an existing event.
 
         This is synchronous HTTP — the user expects confirmation.
 
         Args:
             event_id: The event_id from PullResult.
-            reward: Reward value (0.0-1.0).
-            is_human: Whether this is a human-graded reward.
+            grade: Grade value (0.0-1.0).
         """
         self._ensure_connected()
-        self._http.update_reward(event_id, reward, is_human_reward=is_human)
+        self._http.submit_grade(event_id, grade)
 
     def sync(self) -> None:
-        """Explicit state refresh from cloud."""
+        """Explicit state refresh from cloud.
+
+        If the response is malformed, the existing bandit cache is preserved
+        and a warning is logged (fail-safe: keep last-known-good state).
+        """
         self._ensure_connected()
         data = self._http.heartbeat()
         with self._lock:
-            self._apply_sync(data)
+            prev = dict(self._bandits)
+            try:
+                self._apply_sync(data)
+            except ValueError:
+                self._bandits = prev
+                logger.warning(
+                    "Sync response malformed — keeping last-known-good state",
+                    exc_info=True,
+                )
+                return
         logger.info("Manual sync — %d bandits", len(self._bandits))
 
     def close(self) -> None:
@@ -369,6 +422,16 @@ class BanditoClient:
 
     def _apply_sync(self, data: dict[str, Any]) -> None:
         """Hydrate _bandits cache from sync response. Caller holds lock."""
+        try:
+            self._apply_sync_inner(data)
+        except (KeyError, TypeError, IndexError) as e:
+            raise ValueError(
+                f"Malformed sync response from server: {e}. "
+                "Check that SDK version matches server version."
+            ) from e
+
+    def _apply_sync_inner(self, data: dict[str, Any]) -> None:
+        """Inner implementation of sync response parsing."""
         self._bandits.clear()
 
         for b in data.get("bandits", []):
@@ -460,18 +523,26 @@ class BanditoClient:
         deduplicated are marked flushed. Events the server rejected are
         retried up to ``_MAX_EVENT_RETRIES`` times, then marked as dead
         (skipped on future flushes until reconnect).
+
+        Lock discipline: acquire self._lock only for reads/writes of
+        _dead_uuids and _retry_counts. Release before HTTP calls so
+        pull() is never blocked by a slow flush.
         """
         try:
             pending = self._store.pending()
             if not pending:
                 return
 
-            # Skip events already known to be permanently rejected
-            if self._dead_uuids:
-                pending = [e for e in pending if e["local_event_uuid"] not in self._dead_uuids]
+            # Under lock: snapshot dead UUIDs to filter pending list
+            with self._lock:
+                dead_snapshot = set(self._dead_uuids)
+
+            if dead_snapshot:
+                pending = [e for e in pending if e["local_event_uuid"] not in dead_snapshot]
                 if not pending:
                     return
 
+            # Outside lock: HTTP call (may be slow)
             payload = prepare_cloud_payload(pending, include_text=(self._data_storage != "local"))
             logger.debug("Flush payload: %s", payload)
             result = self._http.ingest_events(payload)
@@ -482,18 +553,32 @@ class BanditoClient:
                 uid = err.get("local_event_uuid")
                 if uid:
                     errored_uuids.add(uid)
+
+            # Under lock: update retry counts and dead UUIDs
+            with self._lock:
+                for uid in errored_uuids:
                     count = self._retry_counts.get(uid, 0) + 1
                     self._retry_counts[uid] = count
                     if count >= _MAX_EVENT_RETRIES:
                         self._dead_uuids.add(uid)
                         logger.warning(
                             "Event %s permanently rejected after %d attempts: %s",
-                            uid, count, err.get("reason", "unknown"),
+                            uid, count,
+                            next(
+                                (e.get("reason", "unknown") for e in result.get("errors", [])
+                                 if e.get("local_event_uuid") == uid),
+                                "unknown",
+                            ),
                         )
                     else:
                         logger.debug(
                             "Event %s rejected (attempt %d/%d): %s",
-                            uid, count, _MAX_EVENT_RETRIES, err.get("reason", "unknown"),
+                            uid, count, _MAX_EVENT_RETRIES,
+                            next(
+                                (e.get("reason", "unknown") for e in result.get("errors", [])
+                                 if e.get("local_event_uuid") == uid),
+                                "unknown",
+                            ),
                         )
 
             # Mark accepted + deduplicated events as flushed

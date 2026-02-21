@@ -37,7 +37,7 @@ class TestUpdate:
             client.update(
                 result,
                 query_text="hello",
-                response_text="world",
+                response="world",
                 reward=0.85,
                 cost=0.003,
                 latency=1200.0,
@@ -60,7 +60,7 @@ class TestUpdate:
             client.update(
                 result,
                 query_text="q",
-                response_text="r",
+                response="r",
                 reward=0.5,
                 cost=0.01,
                 latency=500.0,
@@ -74,29 +74,31 @@ class TestUpdate:
             assert "bandit_id" in event
             assert "arm_id" in event
             # Optional fields match backend names
-            assert event["immediate_reward"] == 0.5
+            assert event["early_reward"] == 0.5
             assert event["cost"] == 0.01
             assert event["latency"] == 500.0
             assert event["input_tokens"] == 100
             assert event["output_tokens"] == 200
             assert event["segment"] == {"tier": "pro"}
             assert event["query_text"] == "q"
-            assert event["response_text"] == {"response": "r"}
+            assert event["response"] == {"response": "r"}
         finally:
             client.close()
 
     @respx.mock
     def test_update_optional_fields_omitted(self):
-        """Fields not passed should not appear in payload."""
+        """Fields not passed should not appear in payload (except auto-latency)."""
         client = _connected_client()
         try:
             result = client.pull("my-chatbot")
             client.update(result)  # no optional fields
             event = client._store.pending()[0]
-            assert "immediate_reward" not in event
+            assert "early_reward" not in event
             assert "cost" not in event
-            assert "latency" not in event
             assert "query_text" not in event
+            # latency is auto-calculated from pull() timestamp
+            assert "latency" in event
+            assert event["latency"] > 0
         finally:
             client.close()
 
@@ -136,22 +138,22 @@ class TestUpdate:
             result = client.pull("my-chatbot")
             client.update(result, reward=0.0)
             event = client._store.pending()[0]
-            assert event["immediate_reward"] == 0.0
+            assert event["early_reward"] == 0.0
         finally:
             client.close()
 
 
 class TestResponseTextNormalization:
-    """Verify response_text is normalized to dict before storage."""
+    """Verify response is normalized to dict before storage."""
 
     @respx.mock
     def test_string_normalized_to_dict(self):
         client = _connected_client()
         try:
             result = client.pull("my-chatbot")
-            client.update(result, response_text="hello")
+            client.update(result, response="hello")
             event = client._store.pending()[0]
-            assert event["response_text"] == {"response": "hello"}
+            assert event["response"] == {"response": "hello"}
         finally:
             client.close()
 
@@ -161,9 +163,9 @@ class TestResponseTextNormalization:
         try:
             result = client.pull("my-chatbot")
             rich = {"choices": [{"text": "Hi"}], "usage": {"tokens": 5}}
-            client.update(result, response_text=rich)
+            client.update(result, response=rich)
             event = client._store.pending()[0]
-            assert event["response_text"] == rich
+            assert event["response"] == rich
         finally:
             client.close()
 
@@ -174,7 +176,7 @@ class TestResponseTextNormalization:
             result = client.pull("my-chatbot")
             client.update(result)
             event = client._store.pending()[0]
-            assert "response_text" not in event
+            assert "response" not in event
         finally:
             client.close()
 
@@ -190,51 +192,100 @@ class TestResponseTextNormalization:
         client._data_storage = "cloud"
         try:
             result = client.pull("my-chatbot")
-            client.update(result, response_text="hello")
+            client.update(result, response="hello")
             client._executor.shutdown(wait=True)
             client._executor = None
 
             body = json.loads(ingest_route.calls[0].request.content)
             event = body["events"][0]
-            assert event["response_text"] == {"response": "hello"}
+            assert event["response"] == {"response": "hello"}
         finally:
             client.close()
 
 
-class TestReward:
+class TestGrade:
     @respx.mock
-    def test_reward_sends_http_request(self):
+    def test_grade_sends_http_request(self):
         client = _connected_client()
-        reward_route = respx.patch(f"{BASE_URL}/api/v1/events/evt-123/reward").mock(
+        grade_route = respx.patch(f"{BASE_URL}/api/v1/events/evt-123/grade").mock(
             return_value=httpx.Response(200, json={
-                "event_id": 1, "reward": 0.9,
-                "computed_reward": 0.85, "is_human_reward": True,
+                "event_id": 1, "grade": 0.9,
+                "reward": 0.85, "is_graded": True,
                 "state_updated": True,
             })
         )
         try:
-            client.reward("evt-123", 0.9)
-            assert reward_route.called
-            request = reward_route.calls[0].request
+            client.grade("evt-123", 0.9)
+            assert grade_route.called
+            request = grade_route.calls[0].request
             body = json.loads(request.content)
-            assert body["reward"] == 0.9
-            assert body["is_human_reward"] is True
+            assert body["grade"] == 0.9
+            assert body["is_graded"] is True
+        finally:
+            client.close()
+
+
+class TestFailedUpdate:
+    """Tests for the failed=True update path."""
+
+    @respx.mock
+    def test_failed_sets_reward_zero(self):
+        """failed=True with no reward defaults early_reward to 0.0."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result, failed=True)
+            event = client._store.pending()[0]
+            assert event["early_reward"] == 0.0
         finally:
             client.close()
 
     @respx.mock
-    def test_reward_machine_grade(self):
+    def test_failed_preserves_explicit_reward(self):
+        """failed=True with explicit reward keeps the explicit value."""
         client = _connected_client()
-        reward_route = respx.patch(f"{BASE_URL}/api/v1/events/evt-456/reward").mock(
-            return_value=httpx.Response(200, json={
-                "event_id": 1, "reward": 0.7,
-                "computed_reward": 0.65, "is_human_reward": False,
-                "state_updated": True,
-            })
-        )
         try:
-            client.reward("evt-456", 0.7, is_human=False)
-            body = json.loads(reward_route.calls[0].request.content)
-            assert body["is_human_reward"] is False
+            result = client.pull("my-chatbot")
+            client.update(result, failed=True, reward=0.1)
+            event = client._store.pending()[0]
+            assert event["early_reward"] == 0.1
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_failed_sets_run_error_flag(self):
+        """failed=True adds run_error: True to the event."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result, failed=True)
+            event = client._store.pending()[0]
+            assert event["run_error"] is True
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_failed_auto_latency_still_calculated(self):
+        """Latency is auto-calculated even on failure events."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result, failed=True)
+            event = client._store.pending()[0]
+            assert "latency" in event
+            assert event["latency"] > 0
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_failed_false_no_effect(self):
+        """Default failed=False has no run_error key and no reward default."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            client.update(result)
+            event = client._store.pending()[0]
+            assert "run_error" not in event
+            assert "early_reward" not in event
         finally:
             client.close()

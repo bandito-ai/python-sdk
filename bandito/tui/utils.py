@@ -7,21 +7,21 @@ from pathlib import Path
 from typing import Any
 
 
-def format_response_text(
+def format_response(
     value: Any,
     fallback: str = "no response text",
     *,
     max_length: int | None = None,
 ) -> str:
-    """Format a response_text value for display.
+    """Format a response value for display.
 
-    response_text is always stored as a dict after normalization.
+    Response is always stored as a dict after normalization.
     Simple ``{"response": "..."}`` wrappers are unwrapped to the plain
     string.  Richer dicts are pretty-printed as JSON.  Legacy string
     values are returned as-is.
 
     Args:
-        value: The raw response_text value (dict, str, or None).
+        value: The raw response value (dict, str, or None).
         fallback: Text to return when value is None.
         max_length: If set, truncate the result with "..." suffix.
 
@@ -61,8 +61,8 @@ def save_event_json(event_data: dict[str, Any]) -> str:
     keys = [
         "local_event_uuid", "bandit_id", "arm_id",
         "model_name", "model_provider", "system_prompt",
-        "query_text", "response_text",
-        "immediate_reward", "human_reward", "computed_reward",
+        "query_text", "response",
+        "early_reward", "grade", "reward",
         "cost", "latency", "input_tokens", "output_tokens",
         "context_features", "created_at",
     ]

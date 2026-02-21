@@ -36,21 +36,21 @@ def mock_api():
         "items": [
             {"id": 1, "name": "prod-bot", "type": "online", "arm_count": 3,
              "total_pull_count": 500, "optimization_mode": "maximize"},
-            {"id": 2, "name": "experiment", "type": "experiment", "arm_count": 2,
+            {"id": 2, "name": "staging-bot", "type": "offline", "arm_count": 2,
              "total_pull_count": 50, "optimization_mode": "explore"},
         ],
         "total": 2,
     }
     api.get_stats.return_value = {
         "bandit_id": 1, "total_events": 100, "total_rewarded": 80,
-        "avg_computed_reward": 0.75, "total_cost": 5.0, "budget": 50.0,
+        "avg_reward": 0.75, "total_cost": 5.0, "budget": 50.0,
     }
     api.get_arm_performance.return_value = {
         "bandit_id": 1, "total_events": 100,
         "arms": [
             {"arm_id": 1, "model_name": "gpt-4", "model_provider": "openai",
-             "event_count": 60, "pull_share": 0.6, "avg_computed_reward": 0.8,
-             "avg_cost": 0.05, "human_reward_count": 10, "review_ratio": 0.17},
+             "event_count": 60, "pull_share": 0.6, "avg_reward": 0.8,
+             "avg_cost": 0.05, "graded_count": 10, "graded_ratio": 0.17},
         ],
     }
     api.list_events.return_value = {"items": [], "total": 0}

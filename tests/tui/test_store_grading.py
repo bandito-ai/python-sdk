@@ -14,7 +14,7 @@ def _make_event(uuid: str, bandit_id: int = 1, arm_id: int = 1) -> dict:
         "bandit_id": bandit_id,
         "arm_id": arm_id,
         "query_text": f"query for {uuid}",
-        "response_text": f"response for {uuid}",
+        "response": f"response for {uuid}",
         "model_name": "gpt-4",
         "model_provider": "openai",
     }

@@ -43,7 +43,7 @@ class TestFullCycle:
             client.update(
                 result,
                 query_text="What is AI?",
-                response_text="AI is artificial intelligence.",
+                response="AI is artificial intelligence.",
                 reward=0.85,
                 cost=0.003,
                 latency=1200.0,
@@ -62,18 +62,18 @@ class TestFullCycle:
             assert event["local_event_uuid"] == result.event_id
             assert event["query_text"] == "What is AI?"
 
-            # Delayed reward
-            reward_route = respx.patch(
-                f"{BASE_URL}/api/v1/events/{result.event_id}/reward"
+            # Delayed grade
+            grade_route = respx.patch(
+                f"{BASE_URL}/api/v1/events/{result.event_id}/grade"
             ).mock(
                 return_value=httpx.Response(200, json={
-                    "event_id": 1, "reward": 0.9,
-                    "computed_reward": 0.88, "is_human_reward": True,
+                    "event_id": 1, "grade": 0.9,
+                    "reward": 0.88, "is_graded": True,
                     "state_updated": True,
                 })
             )
-            client.reward(result.event_id, 0.9)
-            assert reward_route.called
+            client.grade(result.event_id, 0.9)
+            assert grade_route.called
         finally:
             client.close()
 
@@ -207,14 +207,14 @@ class TestFullCycle:
 class TestPrepareCloudPayload:
     def test_strips_text_and_metadata_when_local(self):
         events = [
-            {"local_event_uuid": "a", "query_text": "hi", "response_text": "hello",
+            {"local_event_uuid": "a", "query_text": "hi", "response": "hello",
              "model_name": "gpt-4", "model_provider": "openai", "cost": 0.1},
             {"local_event_uuid": "b", "query_text": "bye", "model_name": "claude"},
         ]
         stripped = prepare_cloud_payload(events, include_text=False)
         assert len(stripped) == 2
         assert "query_text" not in stripped[0]
-        assert "response_text" not in stripped[0]
+        assert "response" not in stripped[0]
         assert "model_name" not in stripped[0]
         assert "model_provider" not in stripped[0]
         assert stripped[0]["cost"] == 0.1
@@ -226,12 +226,12 @@ class TestPrepareCloudPayload:
 
     def test_keeps_text_but_strips_metadata_when_cloud(self):
         events = [
-            {"local_event_uuid": "a", "query_text": "hi", "response_text": "hello",
+            {"local_event_uuid": "a", "query_text": "hi", "response": "hello",
              "model_name": "gpt-4", "model_provider": "openai", "cost": 0.1},
         ]
         stripped = prepare_cloud_payload(events, include_text=True)
         assert stripped[0]["query_text"] == "hi"
-        assert stripped[0]["response_text"] == "hello"
+        assert stripped[0]["response"] == "hello"
         assert "model_name" not in stripped[0]
         assert "model_provider" not in stripped[0]
 
@@ -260,7 +260,7 @@ class TestPrepareCloudPayload:
             client.update(
                 result,
                 query_text="What is AI?",
-                response_text="AI is artificial intelligence.",
+                response="AI is artificial intelligence.",
             )
 
             # Drain executor so flush completes
@@ -274,7 +274,7 @@ class TestPrepareCloudPayload:
             body = json.loads(ingest_route.calls[0].request.content)
             event = body["events"][0]
             assert "query_text" not in event
-            assert "response_text" not in event
+            assert "response" not in event
             assert "model_name" not in event
             assert "model_provider" not in event
         finally:
@@ -300,7 +300,7 @@ class TestPrepareCloudPayload:
             client.update(
                 result,
                 query_text="What is AI?",
-                response_text="AI is artificial intelligence.",
+                response="AI is artificial intelligence.",
             )
 
             # Drain executor so flush completes
@@ -311,7 +311,7 @@ class TestPrepareCloudPayload:
             body = json.loads(ingest_route.calls[0].request.content)
             event = body["events"][0]
             assert event["query_text"] == "What is AI?"
-            assert event["response_text"] == {"response": "AI is artificial intelligence."}
+            assert event["response"] == {"response": "AI is artificial intelligence."}
             assert "model_name" not in event
             assert "model_provider" not in event
         finally:

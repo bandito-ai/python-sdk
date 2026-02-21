@@ -8,7 +8,7 @@ Recommended (context manager):
         response = call_llm(result.model, result.prompt, user_message)
         client.update(
             result,
-            response_text=response.text,
+            response=response.text,
             input_tokens=response.usage.prompt_tokens,
             output_tokens=response.usage.completion_tokens,
         )
@@ -33,7 +33,7 @@ __all__ = [
     "connect",
     "pull",
     "update",
-    "reward",
+    "grade",
     "sync",
     "close",
 ]
@@ -43,9 +43,10 @@ _lock = threading.Lock()
 
 
 def _get_client() -> BanditoClient:
-    if _client is None:
-        raise RuntimeError("Not connected — call bandito.connect() first")
-    return _client
+    with _lock:
+        if _client is None:
+            raise RuntimeError("Not connected — call bandito.connect() first")
+        return _client
 
 
 def connect(api_key: str | None = None, **kwargs) -> None:
@@ -67,31 +68,33 @@ def update(
     pull_result: PullResult,
     *,
     query_text: str | None = None,
-    response_text: str | dict | None = None,  # TODO: rename to `model_response` — not always text
+    response: str | dict | None = None,
     reward: float | None = None,
     cost: float | None = None,
     latency: float | None = None,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     segment: dict[str, str] | None = None,
+    failed: bool = False,
 ) -> None:
     """Send event data to cloud (writes to SQLite first)."""
     _get_client().update(
         pull_result,
         query_text=query_text,
-        response_text=response_text,
+        response=response,
         reward=reward,
         cost=cost,
         latency=latency,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         segment=segment,
+        failed=failed,
     )
 
 
-def reward(event_id: str, reward: float, **kwargs) -> None:
-    """Send a delayed reward for an existing event."""
-    _get_client().reward(event_id, reward, **kwargs)
+def grade(event_id: str, grade: float) -> None:
+    """Send a human grade for an existing event."""
+    _get_client().grade(event_id, grade)
 
 
 def sync() -> None:

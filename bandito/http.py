@@ -79,14 +79,14 @@ class BanditoHTTP:
         """POST /events — batch event ingestion."""
         return self._request("POST", "/events", json={"events": events})
 
-    def update_reward(
-        self, event_uuid: str, reward: float, is_human_reward: bool = True
+    def submit_grade(
+        self, event_uuid: str, grade: float
     ) -> dict[str, Any]:
-        """PATCH /events/{uuid}/reward — delayed reward update."""
+        """PATCH /events/{uuid}/grade — submit human grade."""
         return self._request(
             "PATCH",
-            f"/events/{event_uuid}/reward",
-            json={"reward": reward, "is_human_reward": is_human_reward},
+            f"/events/{event_uuid}/grade",
+            json={"grade": grade, "is_graded": True},
         )
 
     def list_bandits(self) -> dict[str, Any]:

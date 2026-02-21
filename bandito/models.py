@@ -40,6 +40,7 @@ class PullResult:
     bandit_id: int
     bandit_name: str
     scores: dict[int, float]
+    _pull_time: float = 0.0  # perf_counter timestamp, internal
 
     @property
     def model(self) -> str:

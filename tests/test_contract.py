@@ -181,6 +181,48 @@ class TestSyncContract:
         client._apply_sync(sync_data)
         assert "my-chatbot" in client._bandits
 
+    def test_optional_fields_missing_resilience(self):
+        """_apply_sync handles sync responses missing optional fields.
+
+        Fields like budget, total_cost, avg_latency_last_n, and
+        optimization_mode may be absent from the server response.
+        The SDK should apply sensible defaults without error.
+        """
+        d = EXPECTED_DIMS
+        # Minimal bandit — only required fields, no optional ones
+        minimal_bandit = {
+            "bandit_id": 1,
+            "name": "minimal-bot",
+            "theta": [0.0] * d,
+            "cholesky": np.eye(d).tolist(),
+            "dimensions": d,
+            "arms": [{
+                "arm_id": a["arm_id"],
+                "model_name": a["model_name"],
+                "model_provider": a["model_provider"],
+                "system_prompt": a["system_prompt"],
+                "is_prompt_templated": a["is_prompt_templated"],
+            } for a in ARM_DATA],
+            # Intentionally omitted: budget, total_cost, avg_latency_last_n,
+            # optimization_mode, type, cost_importance, latency_importance,
+            # total_pull_count
+        }
+        sync_data = {"bandits": [minimal_bandit], "server_time": "2025-01-01T00:00:00Z"}
+
+        client = _make_offline_client()
+        client._apply_sync(sync_data)
+
+        cache = client._bandits["minimal-bot"]
+        assert cache.optimization_mode == "base"  # default
+        assert cache.budget is None
+        assert cache.total_cost is None
+        assert cache.avg_latency_last_n is None
+        assert len(cache.arms) == len(ARM_DATA)
+
+        # Should be able to pull without error
+        result = client.pull("minimal-bot")
+        assert result.arm is not None
+
     def test_feature_matrix_shape_matches_dims(self):
         """Pre-allocated feature matrix has shape (n_arms, dims)."""
         d = EXPECTED_DIMS

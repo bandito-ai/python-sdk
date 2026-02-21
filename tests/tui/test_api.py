@@ -61,21 +61,21 @@ class TestListEvents:
         route = respx.get(f"{BASE}/events").mock(
             return_value=Response(200, json={"items": [], "total": 0})
         )
-        api.list_events(1, has_human_reward=False)
+        api.list_events(1, has_grade=False)
         params = dict(route.calls[0].request.url.params)
         assert params["bandit_id"] == "1"
-        assert params["has_human_reward"] == "false"
+        assert params["has_grade"] == "false"
 
 
 class TestSubmitGrade:
     @respx.mock
-    def test_sends_human_reward(self, api):
-        route = respx.patch(f"{BASE}/events/uuid-123/reward").mock(
-            return_value=Response(200, json={"event_id": 1, "reward": 1.0})
+    def test_sends_grade(self, api):
+        route = respx.patch(f"{BASE}/events/uuid-123/grade").mock(
+            return_value=Response(200, json={"event_id": 1, "grade": 1.0})
         )
         api.submit_grade("uuid-123", 1.0)
         body = route.calls[0].request.content
         import json
         parsed = json.loads(body)
-        assert parsed["reward"] == 1.0
-        assert parsed["is_human_reward"] is True
+        assert parsed["grade"] == 1.0
+        assert parsed["is_graded"] is True

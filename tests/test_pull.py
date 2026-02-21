@@ -242,3 +242,96 @@ class TestFeatureMatrixConstruction:
                     arm_identities, index_map, query, bandit_avg, arm_lats,
                 )
                 np.testing.assert_array_equal(X1, X2)
+
+
+# ---------- Circuit Breaker (exclude) ----------
+
+
+class TestExclude:
+    """Tests for pull(exclude=...) circuit breaker."""
+
+    @respx.mock
+    def test_exclude_single_arm(self):
+        """Excluding arm 1 should never return arm 1."""
+        client = _connected_client()
+        try:
+            for _ in range(20):
+                result = client.pull("my-chatbot", exclude=[1])
+                assert result.arm.arm_id != 1
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_exclude_multiple_arms(self):
+        """Excluding arms 1 and 3 should only return arm 2."""
+        client = _connected_client()
+        try:
+            for _ in range(20):
+                result = client.pull("my-chatbot", exclude=[1, 3])
+                assert result.arm.arm_id == 2
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_exclude_all_raises(self):
+        """Excluding all arm IDs raises ValueError."""
+        client = _connected_client()
+        try:
+            with pytest.raises(ValueError, match="All arms excluded"):
+                client.pull("my-chatbot", exclude=[1, 2, 3])
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_exclude_empty_list_no_op(self):
+        """exclude=[] behaves like no exclusion."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot", exclude=[])
+            assert isinstance(result, PullResult)
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_exclude_nonexistent_id_no_effect(self):
+        """Unknown arm_id in exclude list is silently ignored."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot", exclude=[999])
+            assert isinstance(result, PullResult)
+            assert result.arm.arm_id in {1, 2, 3}
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_exclude_none_no_op(self):
+        """exclude=None (default) behaves normally."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot", exclude=None)
+            assert isinstance(result, PullResult)
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_exclude_scores_omit_excluded_arms(self):
+        """Excluded arms should not appear in result.scores."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot", exclude=[1])
+            assert 1 not in result.scores
+            assert len(result.scores) == 2
+            assert set(result.scores.keys()) <= {2, 3}
+        finally:
+            client.close()
+
+    @respx.mock
+    def test_no_exclude_scores_contain_all_arms(self):
+        """Without exclude, scores contains all arms."""
+        client = _connected_client()
+        try:
+            result = client.pull("my-chatbot")
+            assert len(result.scores) == 3
+            assert set(result.scores.keys()) == {1, 2, 3}
+        finally:
+            client.close()

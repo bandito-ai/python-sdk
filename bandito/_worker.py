@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-_TEXT_FIELDS = ("query_text", "response_text")
+_TEXT_FIELDS = ("query_text", "response")
 _METADATA_FIELDS = ("model_name", "model_provider")
 
 
@@ -10,7 +10,7 @@ def prepare_cloud_payload(events: list[dict], *, include_text: bool) -> list[dic
     """Return shallow copies of events ready for cloud ingest.
 
     Always strips model_name/model_provider (only needed in local SQLite for TUI).
-    Strips query_text/response_text when include_text is False (data_storage="local").
+    Strips query_text/response when include_text is False (data_storage="local").
     """
     stripped = []
     for e in events:

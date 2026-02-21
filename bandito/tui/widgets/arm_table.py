@@ -56,7 +56,7 @@ class ArmTable(Static):
         else:
             table.add_columns(
                 "Model", "Provider", "Events", "Pull %", "Avg Reward",
-                "Avg Cost", "Reviewed", "Review %",
+                "Avg Cost", "Graded", "Grade %",
             )
 
     def update_arms(self, data: dict[str, Any]) -> None:
@@ -75,7 +75,7 @@ class ArmTable(Static):
 
         for arm in arms:
             pull_share = arm.get("pull_share")
-            avg_reward = arm.get("avg_computed_reward")
+            avg_reward = arm.get("avg_reward")
 
             if self._compact:
                 table.add_row(
@@ -85,7 +85,7 @@ class ArmTable(Static):
                 )
             else:
                 avg_cost = arm.get("avg_cost")
-                review_ratio = arm.get("review_ratio")
+                graded_ratio = arm.get("graded_ratio")
 
                 table.add_row(
                     arm.get("model_name", "?"),
@@ -94,6 +94,6 @@ class ArmTable(Static):
                     f"{pull_share:.0%}" if pull_share is not None else "—",
                     f"{avg_reward:.3f}" if avg_reward is not None else "—",
                     f"${avg_cost:.4f}" if avg_cost is not None else "—",
-                    str(arm.get("human_reward_count", 0)),
-                    f"{review_ratio:.0%}" if review_ratio is not None else "—",
+                    str(arm.get("graded_count", 0)),
+                    f"{graded_ratio:.0%}" if graded_ratio is not None else "—",
                 )

@@ -55,7 +55,7 @@ class TuiAPI:
         self,
         bandit_id: int,
         *,
-        has_human_reward: bool | None = None,
+        has_grade: bool | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -65,8 +65,8 @@ class TuiAPI:
             "limit": limit,
             "offset": offset,
         }
-        if has_human_reward is not None:
-            params["has_human_reward"] = has_human_reward
+        if has_grade is not None:
+            params["has_grade"] = has_grade
         resp = self._client.get("/events", params=params)
         resp.raise_for_status()
         return resp.json()
@@ -78,10 +78,10 @@ class TuiAPI:
         return resp.json()
 
     def submit_grade(self, event_uuid: str, reward: float) -> dict[str, Any]:
-        """PATCH /events/{uuid}/reward — submit human grade."""
+        """PATCH /events/{uuid}/grade — submit human grade."""
         resp = self._client.patch(
-            f"/events/{event_uuid}/reward",
-            json={"reward": reward, "is_human_reward": True},
+            f"/events/{event_uuid}/grade",
+            json={"grade": reward, "is_graded": True},
         )
         resp.raise_for_status()
         return resp.json()

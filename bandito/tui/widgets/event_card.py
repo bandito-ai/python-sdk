@@ -82,11 +82,8 @@ class EventCard(ListItem):
         indicator = " ►" if self.highlighted else "  "
         label = f"{model}/{provider}" if provider else model
 
-        imm_reward = self.event_data.get("immediate_reward")
-        reward_tag = f" [dim]r:{imm_reward:.2f}[/]" if imm_reward is not None else ""
-
         self.query_one(".ec-model", Static).update(
-            f"{prefix}{indicator} [bold]{label}[/]{reward_tag}"
+            f"{prefix}{indicator} [bold]{label}[/]"
         )
 
         query = self.event_data.get("query_text", "")
@@ -94,7 +91,7 @@ class EventCard(ListItem):
         if len(query) > self.MAX_QUERY_LEN:
             truncated += "..."
         if self._graded:
-            reward = self.event_data.get("human_reward")
+            reward = self.event_data.get("grade")
             if reward is not None and reward >= 0.5:
                 truncated = f"[dim]graded good[/]"
             elif reward is not None:

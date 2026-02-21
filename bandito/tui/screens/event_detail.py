@@ -10,7 +10,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Markdown, Static
 
-from bandito.tui.utils import format_response_text
+from bandito.tui.utils import format_response
 
 
 class EventDetailScreen(ModalScreen[float | None]):
@@ -85,11 +85,11 @@ class EventDetailScreen(ModalScreen[float | None]):
         cost_str = f"${cost:.4f}" if cost is not None else "—"
         latency = ev.get("latency")
         lat_str = f"{latency:.2f}s" if latency is not None else "—"
-        imm_reward = ev.get("immediate_reward")
-        reward_str = f"{imm_reward:.3f}" if imm_reward is not None else "—"
+        early = ev.get("early_reward")
+        reward_str = f"{early:.3f}" if early is not None else "—"
 
         query_text = str(ev.get("query_text") or "*no query text*")
-        response_display = format_response_text(ev.get("response_text"))
+        response_display = format_response(ev.get("response"))
         prompt = ev.get("system_prompt")
 
         with Vertical(id="detail-dialog"):
@@ -97,12 +97,12 @@ class EventDetailScreen(ModalScreen[float | None]):
                 f"[bold]{model}[/] / {provider}  "
                 f"[dim]cost:[/] {cost_str}  "
                 f"[dim]latency:[/] {lat_str}  "
-                f"[dim]reward:[/] {reward_str}  "
-                f"[dim]{uuid[:12]}...[/]",
+                f"[dim]reward:[/] {reward_str}",
                 id="detail-meta",
             )
 
             with VerticalScroll(id="detail-content"):
+                yield Static(f"[dim]event_id:[/] {uuid}", classes="detail-text")
                 yield Static("USER INPUT", classes="detail-section-header")
                 yield Markdown(query_text, classes="detail-markdown")
                 yield Static("RESPONSE", classes="detail-section-header")
