@@ -15,7 +15,6 @@ or
 pip install git+https://github.com/bandito-ai/python-sdk.git
 ```
 
-
 Requires Python 3.12+.
 
 ## Getting Started
@@ -41,7 +40,7 @@ Opens the Bandito web dashboard where you can create bandits and configure arms 
 ```python
 import bandito
 
-bandito.connect(api_key="bnd_...")
+bandito.connect()  # uses API key saved by `bandito init`
 
 result = bandito.pull("my-chatbot", query=user_message)
 
@@ -58,10 +57,12 @@ bandito.update(
     query_text=user_message,
     response=response.choices[0].message.content,
     reward=0.85,
-    cost=0.003,
-    latency=elapsed_ms,
+    input_tokens=response.usage.prompt_tokens,
+    output_tokens=response.usage.completion_tokens,
 )
 ```
+
+Latency is auto-calculated from the time between `pull()` and `update()`. Cost is auto-calculated from token counts when not provided explicitly. You can override the saved API key by passing `api_key="bnd_..."` to `connect()`.
 
 ### 4. Grade responses
 
@@ -123,11 +124,11 @@ Bootstrap the SDK. Authenticates with the cloud, fetches all bandit state, and f
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `api_key` | `str` | `BANDITO_API_KEY` env | API key for authentication |
-| `base_url` | `str` | `http://localhost:8000` | Cloud API base URL |
+| `base_url` | `str` | `https://bandito-api.onrender.com` | Cloud API base URL |
 | `store_path` | `str` | `~/.bandito/events.db` | Path to SQLite file for event durability |
 | `data_storage` | `str` | `"local"` | `"local"` keeps query/response text local-only; `"cloud"` sends it to the server |
 
-### `pull(bandit_name, *, query=None) -> PullResult`
+### `pull(bandit_name, *, query=None, exclude=None) -> PullResult`
 
 Local Thompson Sampling decision. Pure math, <1ms, no network call.
 
@@ -135,12 +136,14 @@ Local Thompson Sampling decision. Pure math, <1ms, no network call.
 |-----------|------|-------------|
 | `bandit_name` | `str` | Name of the bandit to pull from |
 | `query` | `str` | User query text (used for feature engineering) |
+| `exclude` | `list[int]` | Arm IDs to exclude from selection (circuit breaker). Use `result.arm.arm_id` to skip a failing arm. |
 
 Returns a `PullResult` with:
 - `result.model` — model name (e.g. `"gpt-4o"`)
 - `result.prompt` — system prompt text
 - `result.event_id` — UUID linking this pull to its update/grade
-- `result.arm` — full `Arm` object (model_name, model_provider, system_prompt, is_prompt_templated)
+- `result.bandit_name` — name of the bandit
+- `result.arm` — full `Arm` object (arm_id, model_name, model_provider, system_prompt, is_prompt_templated)
 - `result.scores` — `dict[int, float]` of arm_id to score (for debugging)
 
 ### `update(pull_result, **kwargs)`
@@ -153,11 +156,12 @@ Report event data. Writes to local SQLite first (crash-safe), then submits a non
 | `query_text` | `str` | The user's query |
 | `response` | `str \| dict` | The LLM's response. Strings are auto-wrapped as `{"response": "..."}` |
 | `reward` | `float` | Immediate reward (0.0-1.0) |
-| `cost` | `float` | Cost in dollars |
-| `latency` | `float` | Latency in milliseconds |
-| `input_tokens` | `int` | Input token count (auto-calculates cost if `cost` not provided) |
+| `cost` | `float` | Cost in dollars. Omit to auto-calculate from token counts. |
+| `latency` | `float` | Latency in milliseconds. Omit to auto-calculate from pull() timing. |
+| `input_tokens` | `int` | Input token count (enables auto-cost when `cost` not provided) |
 | `output_tokens` | `int` | Output token count |
 | `segment` | `dict[str, str]` | Key-value segment tags |
+| `failed` | `bool` | Mark as a failed LLM call. Defaults reward to 0.0 and sets `run_error` on the event. |
 
 ### `grade(event_id, grade)`
 
@@ -196,6 +200,7 @@ Launch with `bandito tui`. On first run it prompts for your API key if `~/.bandi
 | `r` | Refresh |
 | `t` | Toggle stats/arms sidebar |
 | `g` | Toggle showing graded events |
+| `d` | Download event as JSON |
 | `j`/`k` | Move cursor down/up |
 | `Enter` | Open event detail |
 | `Escape` | Go back |
@@ -223,8 +228,7 @@ Config is stored at `~/.bandito/config.toml` (created by `bandito init`):
 
 ```toml
 api_key = "bnd_..."
-base_url = "http://localhost:8000"
-data_storage = "cloud"  # omitted when using the default ("local")
+data_storage = "local"
 ```
 
 When `data_storage = "local"` (the default), query and response text are stored only in the local SQLite database and never sent to the cloud. Set to `"cloud"` to include text in server-side events.
@@ -247,8 +251,8 @@ bandito/
 ├── models.py          # Arm, PullResult
 ├── http.py            # Sync httpx transport
 ├── store.py           # SQLite WAL event store
-├── _worker.py         # Cloud payload utilities
-├── cli.py             # CLI dispatcher (init, create, ui)
+├── _worker.py         # Cloud payload builder
+├── cli.py             # CLI dispatcher (init, create, tui)
 ├── cli_init.py        # bandito init
 ├── cli_create.py      # bandito create
 ├── engine/            # Pure math (copied from backend)
@@ -266,5 +270,5 @@ bandito/
 
 ```bash
 uv sync              # Install dependencies
-uv run pytest -q     # Run tests (95 tests)
+uv run pytest -q     # Run tests
 ```

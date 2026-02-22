@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".bandito"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 
-DEFAULT_BASE_URL = "http://localhost:8000"
+DEFAULT_BASE_URL = "https://bandito-api.onrender.com"
 
 
 @dataclass
