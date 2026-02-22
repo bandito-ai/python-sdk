@@ -29,24 +29,18 @@ def run_init() -> None:
         print("  Error: API key is required.")
         sys.exit(1)
 
-    # 3. Prompt for base URL
-    base_url_input = input(
-        f"  Base URL [{DEFAULT_BASE_URL}]: "
-    ).strip()
-    base_url = base_url_input or DEFAULT_BASE_URL
-
-    # 4. Data storage preference
+    # 3. Data storage preference
     storage_answer = input(
         "  Store query/response text in the cloud? [y/N]: "
     ).strip().lower()
     data_storage = "cloud" if storage_answer == "y" else "local"
 
-    # 5. Validate connection
-    print(f"  Connecting to {base_url}...")
+    # 4. Validate connection
+    print(f"  Connecting to {DEFAULT_BASE_URL}...")
     try:
         from bandito.http import BanditoHTTP
 
-        http = BanditoHTTP(base_url=base_url, api_key=api_key)
+        http = BanditoHTTP(base_url=DEFAULT_BASE_URL, api_key=api_key)
         try:
             http.list_bandits()
         finally:
@@ -61,26 +55,26 @@ def run_init() -> None:
             else:
                 print(f"  Error: Server returned {status}.")
         elif isinstance(exc, httpx.ConnectError):
-            print(f"  Error: Cannot connect to {base_url} — is the server running?")
+            print(f"  Error: Cannot connect to {DEFAULT_BASE_URL}.")
         elif isinstance(exc, httpx.TimeoutException):
-            print(f"  Error: Connection to {base_url} timed out.")
+            print(f"  Error: Connection to {DEFAULT_BASE_URL} timed out.")
         else:
             print(f"  Error: {exc}")
         sys.exit(1)
 
     print("  Connected!")
 
-    # 6. Save config
-    save_config(api_key, base_url, data_storage)
+    # 5. Save config
+    save_config(api_key, data_storage=data_storage)
     print(f"  Config saved to {CONFIG_FILE}")
 
-    # 7. Next steps
+    # 6. Next steps
     print()
     print("  Next steps:")
     print("    1. Create a bandit:  bandito create")
     print("    2. Use the SDK:")
     print()
     print("       import bandito")
-    print('       bandito.connect(api_key="...")')
+    print("       bandito.connect()")
     print('       result = bandito.pull("my-bandit", query="hello")')
     print("       # call result.model / result.prompt")

@@ -32,28 +32,30 @@ SetupScreen (first-run only, if no API key)
     |
 BanditSelectScreen (landing page)
     | Enter
-DashboardScreen
-    |-- Tab: Stats (StatsPanel)
-    |-- Tab: Arms (ArmTable)
-    +-- Tab: Grading (EventCard list)
-                | Enter
-            EventDetailScreen (modal)
+DashboardScreen (split-pane: event list + detail, toggleable sidebar)
+    |                              | t
+    | Enter                    Stats/Arms sidebar
+EventDetailScreen (modal)
 ```
 
 ## Keyboard Shortcuts
 
-| Key             | Action                |
-|-----------------|-----------------------|
-| `q`             | Quit                  |
-| `Esc`           | Go back               |
-| `Enter`         | Select / open detail  |
-| `Tab`           | Next tab              |
-| `Shift+Tab`     | Previous tab          |
-| `y`             | Grade good (1.0)      |
-| `n`             | Grade bad (0.0)       |
-| `r`             | Refresh data          |
-| `?`             | Help overlay          |
-| `j` / `k`       | Navigate lists        |
+| Key             | Action                          |
+|-----------------|---------------------------------|
+| `y`             | Grade good (1.0)                |
+| `n`             | Grade bad (0.0)                 |
+| `s`             | Skip (move to end of list)      |
+| `Space`         | Toggle selection (batch grading) |
+| `a`             | Select all                      |
+| `r`             | Refresh data                    |
+| `t`             | Toggle stats/arms sidebar       |
+| `g`             | Toggle showing graded events    |
+| `d`             | Download event as JSON          |
+| `j` / `k`       | Navigate lists                  |
+| `Enter`         | Select / open detail            |
+| `Esc`           | Go back                         |
+| `?`             | Help overlay                    |
+| `q`             | Quit                            |
 
 ## Screens
 
@@ -64,13 +66,11 @@ First-run only. Prompts for API key and optional base URL. Validates by calling 
 Lists all bandits with name, type, arm count, pull count, and optimization mode. Select one to open the dashboard.
 
 ### Dashboard
-Three tabs:
+Split-pane grading interface with event list and detail view. Press `t` to toggle the stats/arms sidebar.
 
-**Stats** — Bandit-level summary cards: total events, rewarded count, average reward, total cost, budget.
+**Event list** — Ungraded events from local SQLite. Each card shows model, provider, cost, latency, and a truncated query. Press `y`/`n` to grade inline, `Space` to select for batch grading, or `Enter` to open the full event detail.
 
-**Arms** — Per-arm performance table sorted by pull share (winning arm at top): model, provider, event count, pull %, avg reward, avg cost, reviewed count, review %.
-
-**Grading** — Ungraded events from the cloud API. Each card shows model, provider, cost, latency, and a truncated query. Press `y`/`n` to grade inline, or `Enter` to open the full event detail.
+**Sidebar** (toggle with `t`) — Stats summary cards (total events, average reward, total cost, budget) and per-arm performance table sorted by pull share.
 
 ### Event Detail
 Modal showing the full query text, response text, and system prompt. Grade with `y`/`n` or dismiss with `Esc`.
@@ -82,13 +82,13 @@ Modal showing the full query text, response text, and system prompt. Grade with 
 ```
 SDK writes events ──→ Local SQLite (~/.bandito/events.db)
                               │
-TUI reads event content ──────┘  (query_text, response_text, model_name)
+TUI reads event content ──────┘  (query_text, response, model_name)
     │
     ├── Display: fully local, no cloud round-trip for response text
     │
     └── Grade submission:
         ├── 1. Mark graded locally (human_reward + graded_at in SQLite)
-        └── 2. PATCH /events/{uuid}/reward to cloud API
+        └── 2. PATCH /events/{uuid}/grade to cloud API
                 └── Cloud runs Bayesian update, distributes new weights
 ```
 
@@ -113,7 +113,7 @@ sdk/bandito/
         screens/
             setup.py          # First-run API key input
             bandit_select.py  # Bandit list / picker
-            dashboard.py      # Tabbed view: stats, arms, grading
+            dashboard.py      # Split-pane grading workbench
             event_detail.py   # Full event detail modal
             help.py           # Keybinding reference overlay
         widgets/
