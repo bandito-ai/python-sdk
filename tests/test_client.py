@@ -484,3 +484,38 @@ class TestPartialAcceptance:
             assert "bad-event" not in sent_uuids
         finally:
             client.close()
+
+
+class TestEventQuotaWarning:
+    @respx.mock
+    def test_flush_logs_quota_warning(self, caplog):
+        """Ingest response with warning field logs it via logger.warning."""
+        import logging
+
+        respx.post(f"{BASE_URL}/api/v1/sync/connect").mock(
+            return_value=httpx.Response(200, json=make_sync_response())
+        )
+        warning_msg = "Event quota 90% used (900/1000 this month)"
+        respx.post(f"{BASE_URL}/api/v1/events").mock(
+            return_value=httpx.Response(201, json={
+                "accepted": 1, "duplicates": 0, "errors": [],
+                "warning": warning_msg,
+            })
+        )
+
+        client = BanditoClient(
+            api_key=API_KEY,
+            base_url=BASE_URL,
+            store_path=":memory:",
+        )
+        try:
+            client.connect()
+            result = client.pull("my-chatbot", query="hello")
+            client.update(result, response="world", reward=0.8)
+
+            with caplog.at_level(logging.WARNING, logger="bandito.client"):
+                client._flush_pending()
+
+            assert warning_msg in caplog.text
+        finally:
+            client.close()

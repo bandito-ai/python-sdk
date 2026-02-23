@@ -566,6 +566,10 @@ class BanditoClient:
             logger.debug("Flush payload: %s", payload)
             result = self._http.ingest_events(payload)
 
+            warning = result.get("warning")
+            if warning:
+                logger.warning(warning)
+
             # Parse per-event errors from server response
             errored_uuids: set[str] = set()
             for err in result.get("errors", []):
