@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from textual.app import ComposeResult
 from textual.widgets import ListItem, Static
+
+
+def _relative_time(epoch: float | None) -> str:
+    """Return a human-friendly relative time string (e.g. '5m', '2h', '3d')."""
+    if epoch is None:
+        return ""
+    delta = time.time() - epoch
+    if delta < 0:
+        return ""
+    if delta < 60:
+        return f"{int(delta)}s"
+    if delta < 3600:
+        return f"{int(delta / 60)}m"
+    if delta < 86400:
+        return f"{int(delta / 3600)}h"
+    return f"{int(delta / 86400)}d"
 
 
 class EventCard(ListItem):
@@ -22,22 +39,23 @@ class EventCard(ListItem):
     DEFAULT_CSS = """
     EventCard {
         height: auto;
-        padding: 0 1;
+        padding: 1 1;
     }
 
     EventCard .ec-model {
         color: $text;
+        text-style: dim;
     }
 
-    EventCard .ec-query {
-        color: $text-muted;
+    EventCard .ec-meta {
+        color: $text-disabled;
     }
 
     EventCard.--skipped .ec-model {
         color: $text-disabled;
     }
 
-    EventCard.--skipped .ec-query {
+    EventCard.--skipped .ec-meta {
         color: $text-disabled;
     }
 
@@ -45,12 +63,10 @@ class EventCard(ListItem):
         color: $text-muted;
     }
 
-    EventCard.--graded .ec-query {
+    EventCard.--graded .ec-meta {
         color: $text-disabled;
     }
     """
-
-    MAX_QUERY_LEN = 23
 
     def __init__(self, event_data: dict[str, Any], **kwargs) -> None:
         super().__init__(**kwargs)
@@ -61,14 +77,13 @@ class EventCard(ListItem):
 
     def compose(self) -> ComposeResult:
         yield Static("", classes="ec-model")
-        yield Static("", classes="ec-query")
+        yield Static("", classes="ec-meta")
 
     def on_mount(self) -> None:
         self._refresh_display()
 
     def _refresh_display(self) -> None:
         model = self.event_data.get("model_name", "?")
-        provider = self.event_data.get("model_provider", "")
 
         if self._graded:
             prefix = "[dim]\u2713[/]"
@@ -79,29 +94,30 @@ class EventCard(ListItem):
         else:
             prefix = "[ ]"
 
-        indicator = " ►" if self.highlighted else "  "
-        label = f"{model}/{provider}" if provider else model
+        indicator = '' # " ►" if self.highlighted else "  "
+        label = f"{model}"
 
         self.query_one(".ec-model", Static).update(
             f"{prefix}{indicator} [bold]{label}[/]"
         )
 
-        query = self.event_data.get("query_text", "")
-        truncated = query[:self.MAX_QUERY_LEN]
-        if len(query) > self.MAX_QUERY_LEN:
-            truncated += "..."
-        if self._graded:
-            reward = self.event_data.get("grade")
-            if reward is not None and reward >= 0.5:
-                truncated = f"[dim]graded good[/]"
-            elif reward is not None:
-                truncated = f"[dim]graded bad[/]"
-            else:
-                truncated = "[dim]graded[/]"
-        elif self._skipped:
-            truncated = "(skipped)"
-
-        self.query_one(".ec-query", Static).update(f"  {truncated}")
+        # Meta line: relative time + immediate reward
+        parts: list[str] = []
+        created = self.event_data.get("created_at")
+        if isinstance(created, str):
+            from datetime import datetime, timezone
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                created = dt.timestamp()
+            except (ValueError, TypeError):
+                created = None
+        rel = _relative_time(created)
+        if rel:
+            parts.append(rel)
+        early = self.event_data.get("early_reward")
+        if early is not None:
+            parts.append(f"early reward: {early:.2f}")
+        self.query_one(".ec-meta", Static).update(f"  {' · '.join(parts)}" if parts else "")
 
     @property
     def selected(self) -> bool:

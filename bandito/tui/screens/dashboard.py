@@ -37,7 +37,7 @@ class DashboardScreen(Screen):
     }
 
     #list-pane {
-        width: 30;
+        width: 36;
         min-width: 24;
         border-right: solid $accent;
     }
@@ -336,7 +336,6 @@ class DashboardScreen(Screen):
     def _update_detail_pane(self, event_data: dict[str, Any]) -> None:
         self._current_event = event_data
 
-        uuid = event_data.get("local_event_uuid", "?")
         model = event_data.get("model_name", "?")
         provider = event_data.get("model_provider", "?")
 
@@ -346,10 +345,13 @@ class DashboardScreen(Screen):
         latency = event_data.get("latency")
         lat_str = f"{latency:.0f}ms" if latency is not None else "—"
 
+        early = event_data.get("early_reward")
+        reward_str = f"{early:.3f}" if early is not None else "—"
+
         self.query_one("#detail-meta", Static).update(
             f"[bold]{model}[/] / {provider}  "
             f"[dim]cost:[/] {cost_str}  [dim]latency:[/] {lat_str}  "
-            f"[dim]{uuid[:8]}[/]"
+            f"[dim]reward:[/] {reward_str}"
         )
 
         self.query_one("#detail-query-text", Markdown).update(
@@ -610,13 +612,32 @@ class DashboardScreen(Screen):
         """Open event detail on Enter."""
         if isinstance(event.item, EventCard):
             from bandito.tui.screens.event_detail import EventDetailScreen
+            listview = self.query_one("#grading-list", ListView)
+            index = listview.index or 0
             self.app.push_screen(
-                EventDetailScreen(event.item.event_data),
-                callback=self._on_detail_dismiss,
+                EventDetailScreen(
+                    event.item.event_data,
+                    events=self._events,
+                    index=index,
+                ),
             )
 
-    def _on_detail_dismiss(self, grade: float | None) -> None:
-        """Handle grade returned from event detail modal."""
-        if grade is None:
-            return
-        self._grade_focused(grade)
+    def on_event_detail_screen_graded(self, message: Any) -> None:
+        """Handle inline grade from event detail modal."""
+        self._grade_by_uuid(message.uuid, message.grade)
+
+    def _grade_by_uuid(self, uuid: str, reward: float) -> None:
+        """Grade a specific event by UUID and remove it from the list."""
+        self._do_grade(uuid, reward)
+
+        listview = self.query_one("#grading-list", ListView)
+        # Find and remove the card from the listview
+        for i, child in enumerate(listview.children):
+            if isinstance(child, EventCard):
+                if child.event_data.get("local_event_uuid") == uuid:
+                    listview.pop(i)
+                    break
+
+        self._events = [e for e in self._events if e.get("local_event_uuid") != uuid]
+        self._skipped_uuids.discard(uuid)
+        self._after_grade_update()
