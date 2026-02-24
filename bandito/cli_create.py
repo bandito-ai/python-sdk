@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import webbrowser
 
-DASHBOARD_URL = "https://usebandito.com"
+DASHBOARD_URL = "https://usebandito.com/bandits"
 
 
 def run_create() -> None:
