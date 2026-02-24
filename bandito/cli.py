@@ -8,6 +8,7 @@ Usage: bandito <command>
 Commands:
   init     Configure API key and validate connection
   create   Create a new bandit with arms
+  view     Open a bandit in the web dashboard by name
   tui      Launch the TUI scoring workbench
   help     Show this help message
 """
@@ -25,6 +26,12 @@ def main() -> None:
         from bandito.cli_create import run_create
 
         run_create()
+
+    elif command == "view":
+        from bandito.cli_view import run_view
+
+        name = sys.argv[2] if len(sys.argv) > 2 else None
+        run_view(name)
 
     elif command == "tui":
         from bandito.tui.app import BanditoApp
