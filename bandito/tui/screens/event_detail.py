@@ -204,7 +204,13 @@ class EventDetailScreen(ModalScreen[None]):
         uuid = self._event.get("local_event_uuid", "")
         if not uuid:
             return
-        self.post_message(self.Graded(uuid, reward))
+        # Post to the screen below the modal so DashboardScreen receives it.
+        # ModalScreen sits on top; walk the stack to find the dashboard.
+        from bandito.tui.screens.dashboard import DashboardScreen
+        for screen in reversed(self.app.screen_stack):
+            if isinstance(screen, DashboardScreen):
+                screen._grade_by_uuid(uuid, reward)
+                break
         # Remove graded event from local list
         self._events = [e for e in self._events if e.get("local_event_uuid") != uuid]
         if not self._events:
